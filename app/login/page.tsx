@@ -31,16 +31,18 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-10">
+
         <div className="text-center space-y-3">
-          <div className="text-6xl">💰</div>
-          <h1 className="text-4xl font-bold tracking-tight">BillSplit</h1>
-          <p className="text-muted-foreground">Who's paying today?</p>
+          <div className="text-6xl">🏠</div>
+          <h1 className="text-4xl font-bold tracking-tight">Bills</h1>
+          <p className="text-muted-foreground text-sm">Household finances · DeShea & Deepen</p>
         </div>
+
         <div className="space-y-4">
           <button
             onClick={() => handleLogin("DeShea")}
             disabled={!!loading}
-            className="w-full rounded-2xl py-6 flex flex-col items-center gap-2 transition-all active:scale-[0.97] disabled:opacity-60 bg-indigo-500/20 border-2 border-indigo-500/50 hover:bg-indigo-500/30"
+            className="w-full rounded-2xl py-7 flex flex-col items-center gap-2 transition-all active:scale-[0.97] disabled:opacity-60 bg-indigo-500/20 border-2 border-indigo-500/40 hover:bg-indigo-500/30"
           >
             {loading === "DeShea" ? (
               <div className="w-8 h-8 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
@@ -51,10 +53,11 @@ export default function LoginPage() {
               </>
             )}
           </button>
+
           <button
             onClick={() => handleLogin("Deepen")}
             disabled={!!loading}
-            className="w-full rounded-2xl py-6 flex flex-col items-center gap-2 transition-all active:scale-[0.97] disabled:opacity-60 bg-emerald-500/20 border-2 border-emerald-500/50 hover:bg-emerald-500/30"
+            className="w-full rounded-2xl py-7 flex flex-col items-center gap-2 transition-all active:scale-[0.97] disabled:opacity-60 bg-emerald-500/20 border-2 border-emerald-500/40 hover:bg-emerald-500/30"
           >
             {loading === "Deepen" ? (
               <div className="w-8 h-8 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
@@ -66,8 +69,9 @@ export default function LoginPage() {
             )}
           </button>
         </div>
+
         {error && <p className="text-center text-sm text-destructive">{error}</p>}
-        <p className="text-center text-xs text-muted-foreground">Shared household finances · Private & secure</p>
+        <p className="text-center text-xs text-muted-foreground">Private · Shared household account</p>
       </div>
     </div>
   );

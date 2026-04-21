@@ -6,16 +6,25 @@ import {
   formatCurrency, formatShortDate, daysUntilDue,
   isOverdue, getDueDateBadge, getCategoryEmoji, currentMonthBounds,
 } from "@/lib/utils";
-import type { Bill, Payment } from "@/lib/types";
+import type { Bill } from "@/lib/types";
 import QuickPayButtons from "@/components/QuickPayButtons";
+import AddExpenseButton from "@/components/AddExpenseButton";
 import { format } from "date-fns";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+
+const EXPENSE_EMOJIS: Record<string, string> = {
+  "Groceries": "🛒", "Gas": "⛽", "Dining Out": "🍽️",
+  "Home & Supplies": "🏠", "Medical": "💊", "Personal": "👤",
+  "Entertainment": "🎬", "Clothing": "👕", "Other": "📦"
+};
 
 export default function DashboardPage() {
   const supabase = createClient();
   const [bills, setBills] = useState<Bill[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expensesOpen, setExpensesOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<string>("there");
 
   useEffect(() => {
@@ -26,29 +35,37 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [billsRes, paymentsRes] = await Promise.all([
+    const { start, end } = currentMonthBounds();
+    const [billsRes, paymentsRes, expensesRes] = await Promise.all([
       supabase.from("bills").select("*").order("next_due_date", { ascending: true }),
-      supabase.from("payments").select("*, bill:bills(name)").gte("paid_date", currentMonthBounds().start).lte("paid_date", currentMonthBounds().end),
+      supabase.from("payments").select("*").gte("paid_date", start).lte("paid_date", end),
+      supabase.from("expenses").select("*").gte("expense_date", start).lte("expense_date", end).order("expense_date", { ascending: false }),
     ]);
     setBills(billsRes.data ?? []);
     setPayments(paymentsRes.data ?? []);
+    setExpenses(expensesRes.data ?? []);
     setLoading(false);
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  async function deleteExpense(id: string) {
+    await supabase.from("expenses").delete().eq("id", id);
+    fetchData();
+  }
 
   const today = new Date();
   const overdueBills = bills.filter((b) => isOverdue(b.next_due_date));
   const upcomingBills = bills.filter((b) => { const d = daysUntilDue(b.next_due_date); return d >= 0 && d <= 30; });
   const allClear = overdueBills.length === 0 && upcomingBills.length === 0;
 
-  const totalPaid = payments.reduce((s, p) => s + p.amount_paid, 0);
-  const paidByDeshea = payments.filter((p) => p.paid_by === "DeShea").reduce((s, p) => s + p.amount_paid, 0);
-  const paidByDeepen = payments.filter((p) => p.paid_by === "Deepen").reduce((s, p) => s + p.amount_paid, 0);
-  const balance = paidByDeshea - paidByDeepen;
+  const totalBillsPaid = payments.reduce((s, p) => s + p.amount_paid, 0);
+  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+  const totalMonth = totalBillsPaid + totalExpenses;
 
   return (
     <div className="px-4 pt-6 pb-4 space-y-6 max-w-lg mx-auto">
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -60,43 +77,28 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary — clean, no comparison */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-card rounded-2xl p-4 border border-border col-span-2">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">This Month Total</p>
-          <p className="text-3xl font-bold">{formatCurrency(totalPaid)}</p>
-          <p className="text-xs text-muted-foreground mt-1">{payments.length} payments recorded</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">This Month</p>
+          <p className="text-3xl font-bold">{formatCurrency(totalMonth)}</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {payments.length} bill {payments.length === 1 ? "payment" : "payments"} · {expenses.length} {expenses.length === 1 ? "expense" : "expenses"}
+          </p>
         </div>
 
         <div className="bg-card rounded-2xl p-4 border border-border">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">DeShea</p>
-          </div>
-          <p className="text-xl font-bold text-indigo-400">{formatCurrency(paidByDeshea)}</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Bills Paid</p>
+          <p className="text-xl font-bold">{formatCurrency(totalBillsPaid)}</p>
         </div>
 
         <div className="bg-card rounded-2xl p-4 border border-border">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Deepen</p>
-          </div>
-          <p className="text-xl font-bold text-emerald-400">{formatCurrency(paidByDeepen)}</p>
-        </div>
-
-        <div className="bg-card rounded-2xl p-4 border border-border col-span-2">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Balance</p>
-          {balance === 0 ? (
-            <p className="text-xl font-bold text-muted-foreground">Even ✓</p>
-          ) : balance > 0 ? (
-            <p className="text-xl font-bold text-indigo-400">DeShea paid {formatCurrency(balance)} more</p>
-          ) : (
-            <p className="text-xl font-bold text-emerald-400">Deepen paid {formatCurrency(Math.abs(balance))} more</p>
-          )}
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Expenses</p>
+          <p className="text-xl font-bold">{formatCurrency(totalExpenses)}</p>
         </div>
       </div>
 
-      {/* All clear state */}
+      {/* All clear */}
       {allClear && !loading && (
         <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-6 text-center space-y-2">
           <p className="text-3xl">🎉</p>
@@ -113,9 +115,7 @@ export default function DashboardPage() {
             Overdue ({overdueBills.length})
           </h2>
           <div className="space-y-3">
-            {overdueBills.map((bill) => (
-              <BillCard key={bill.id} bill={bill} onPaid={fetchData} />
-            ))}
+            {overdueBills.map((bill) => <BillCard key={bill.id} bill={bill} onPaid={fetchData} />)}
           </div>
         </section>
       )}
@@ -128,12 +128,78 @@ export default function DashboardPage() {
             <span className="text-xs text-muted-foreground font-normal">next 30 days</span>
           </h2>
           <div className="space-y-3">
-            {upcomingBills.map((bill) => (
-              <BillCard key={bill.id} bill={bill} onPaid={fetchData} />
-            ))}
+            {upcomingBills.map((bill) => <BillCard key={bill.id} bill={bill} onPaid={fetchData} />)}
           </div>
         </section>
       )}
+
+      {/* Expenses — collapsible section */}
+      <section>
+        <button
+          onClick={() => setExpensesOpen((v) => !v)}
+          className="w-full flex items-center justify-between py-2"
+        >
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold">Recent Expenses</h2>
+            {expenses.length > 0 && (
+              <span className="text-xs font-semibold bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
+                {expenses.length}
+              </span>
+            )}
+          </div>
+          {expensesOpen
+            ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
+            : <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          }
+        </button>
+
+        {expensesOpen && (
+          <div className="mt-3 space-y-3">
+            <AddExpenseButton />
+
+            {expenses.length === 0 ? (
+              <div className="bg-card rounded-2xl border border-border p-6 text-center">
+                <p className="text-muted-foreground text-sm">No expenses this month yet</p>
+              </div>
+            ) : (
+              expenses.map((exp) => (
+                <div key={exp.id} className="bg-card rounded-2xl border border-border px-4 py-3 flex items-center gap-3">
+                  <span className="text-2xl flex-shrink-0">{EXPENSE_EMOJIS[exp.category] ?? "📦"}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate">{exp.description}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                        exp.paid_by === "DeShea"
+                          ? "bg-indigo-500/20 text-indigo-400"
+                          : "bg-emerald-500/20 text-emerald-400"
+                      }`}>
+                        {exp.paid_by}
+                      </span>
+                      <p className="text-xs text-muted-foreground">{exp.category}</p>
+                      <p className="text-xs text-muted-foreground">{format(new Date(exp.expense_date + "T12:00:00"), "MMM d")}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <p className="font-bold text-sm">{formatCurrency(exp.amount)}</p>
+                    <button
+                      onClick={() => deleteExpense(exp.id)}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {!expensesOpen && expenses.length === 0 && (
+          <div className="mt-2">
+            <AddExpenseButton />
+          </div>
+        )}
+      </section>
 
       {loading && (
         <div className="flex items-center justify-center py-10">

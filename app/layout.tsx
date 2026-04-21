@@ -5,17 +5,15 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "BillSplit",
-  description: "Track and split household bills between DeShea & Deepen",
+  title: "Bills",
+  description: "Household bills for DeShea & Deepen",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "BillSplit",
+    title: "Bills",
   },
-  icons: {
-    apple: "/icons/apple-touch-icon.png",
-  },
+  icons: { apple: "/icons/apple-touch-icon.png" },
 };
 
 export const viewport: Viewport = {
@@ -26,11 +24,7 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
       <head>

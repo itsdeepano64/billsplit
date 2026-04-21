@@ -15,7 +15,6 @@ const NAV_ITEMS = [
 
 export default function BottomNav() {
   const pathname = usePathname();
-
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card/90 backdrop-blur-xl border-t border-border safe-bottom">
       <div className="flex items-stretch max-w-lg mx-auto">
@@ -27,18 +26,11 @@ export default function BottomNav() {
               href={href}
               className={cn(
                 "flex-1 flex flex-col items-center justify-center gap-1 py-3 touch-target transition-colors",
-                active
-                  ? "text-primary"
-                  : "text-muted-foreground active:text-foreground"
+                active ? "text-primary" : "text-muted-foreground active:text-foreground"
               )}
             >
-              <Icon
-                className={cn("w-5 h-5 transition-all", active && "scale-110")}
-                strokeWidth={active ? 2.5 : 2}
-              />
-              <span className={cn("text-[10px] font-medium tracking-wide", active && "font-semibold")}>
-                {label}
-              </span>
+              <Icon className={cn("w-5 h-5 transition-all", active && "scale-110")} strokeWidth={active ? 2.5 : 2} />
+              <span className={cn("text-[10px] font-medium tracking-wide", active && "font-semibold")}>{label}</span>
             </Link>
           );
         })}
