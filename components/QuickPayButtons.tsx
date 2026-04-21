@@ -5,23 +5,14 @@ import { createClient } from "@/lib/supabase/client";
 import { advanceDueDate, formatCurrency } from "@/lib/utils";
 import type { Bill, Payer } from "@/lib/types";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Loader2, X, ChevronDown } from "lucide-react";
-import { format, addWeeks, nextDay, getDay } from "date-fns";
+import { CheckCircle2, Loader2, X } from "lucide-react";
+import { format, addWeeks, getDay } from "date-fns";
 
 const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 
-interface Props { bill: Bill; }
-
-export default function QuickPayButtons({ bill }: Props) {
+export default function QuickPayButtons({ bill }: { bill: Bill }) {
   const [sheet, setSheet] = useState<Payer | null>(null);
   const [justPaid, setJustPaid] = useState(false);
-  const [currentUser, setCurrentUser] = useState<string>("Unknown");
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setCurrentUser(localStorage.getItem("current_user") ?? "Unknown");
-    }
-  }, []);
 
   if (justPaid) {
     return (
@@ -39,14 +30,14 @@ export default function QuickPayButtons({ bill }: Props) {
       <div className="px-4 pb-4 pt-1 grid grid-cols-2 gap-2">
         <button
           onClick={() => setSheet("DeShea")}
-          className="touch-target flex items-center justify-center gap-1.5 border rounded-xl py-3 px-2 text-xs font-bold uppercase tracking-wide transition-all active:scale-[0.97] bg-indigo-500/15 border-indigo-500/30 text-indigo-300 active:bg-indigo-500/25"
+          className="min-h-[48px] flex items-center justify-center gap-1.5 border rounded-xl py-3 px-2 text-xs font-bold uppercase tracking-wide transition-all active:scale-[0.97] bg-indigo-500/15 border-indigo-500/30 text-indigo-300"
         >
           <span className="text-base">💜</span>
           <span className="text-[11px] leading-tight">PAID BY DeShea</span>
         </button>
         <button
           onClick={() => setSheet("Deepen")}
-          className="touch-target flex items-center justify-center gap-1.5 border rounded-xl py-3 px-2 text-xs font-bold uppercase tracking-wide transition-all active:scale-[0.97] bg-emerald-500/15 border-emerald-500/30 text-emerald-300 active:bg-emerald-500/25"
+          className="min-h-[48px] flex items-center justify-center gap-1.5 border rounded-xl py-3 px-2 text-xs font-bold uppercase tracking-wide transition-all active:scale-[0.97] bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
         >
           <span className="text-base">💚</span>
           <span className="text-[11px] leading-tight">PAID BY Deepen</span>
@@ -77,7 +68,7 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
   const [notes, setNotes] = useState("");
   const [split, setSplit] = useState(false);
   const [weeks, setWeeks] = useState(4);
-  const [startDay, setStartDay] = useState(1); // Monday
+  const [startDay, setStartDay] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,43 +79,31 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
       const parsedAmount = parseFloat(amount);
       if (isNaN(parsedAmount) || parsedAmount <= 0) throw new Error("Enter a valid amount");
 
+      // Get current user id — required for RLS
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not logged in");
+
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
       if (split) {
-        // Create weekly split payments
-        const weeklyAmount = parsedAmount / weeks;
+        const weeklyAmount = Math.round((parsedAmount / weeks) * 100) / 100;
         const splitGroupId = crypto.randomUUID();
-        const payments = [];
-
-        for (let i = 0; i < weeks; i++) {
-          // Find next occurrence of chosen day of week
-          let payDate = i === 0 ? today : addWeeks(today, i);
-          // Adjust to the chosen day
-          const targetDay = startDay as 0|1|2|3|4|5|6;
-          const currentDayNum = getDay(payDate);
-          if (currentDayNum !== targetDay) {
-            const daysUntil = (targetDay - currentDayNum + 7) % 7;
-            payDate = new Date(payDate);
-            payDate.setDate(payDate.getDate() + (i === 0 ? daysUntil : 0));
-          }
-
-          payments.push({
-            bill_id: bill.id,
-            paid_by: payer,
-            paid_date: format(addWeeks(today, i), "yyyy-MM-dd"),
-            amount_paid: Math.round(weeklyAmount * 100) / 100,
-            notes: notes || null,
-            weekly_split: true,
-            split_group_id: splitGroupId,
-          });
-        }
-
+        const payments = Array.from({ length: weeks }, (_, i) => ({
+          user_id: user.id,
+          bill_id: bill.id,
+          paid_by: payer,
+          paid_date: format(addWeeks(today, i), "yyyy-MM-dd"),
+          amount_paid: weeklyAmount,
+          notes: notes || null,
+          weekly_split: true,
+          split_group_id: splitGroupId,
+        }));
         const { error: insertError } = await supabase.from("payments").insert(payments);
         if (insertError) throw insertError;
       } else {
-        // Single payment
         const { error: insertError } = await supabase.from("payments").insert({
+          user_id: user.id,
           bill_id: bill.id,
           paid_by: payer,
           paid_date: format(today, "yyyy-MM-dd"),
@@ -149,21 +128,22 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
     }
   }
 
-  const color = payer === "DeShea" ? "indigo" : "emerald";
-  const colorClasses = color === "indigo"
-    ? "bg-indigo-500 hover:bg-indigo-600"
-    : "bg-emerald-500 hover:bg-emerald-600";
+  const isIndigo = payer === "DeShea";
 
   return (
+    // Full screen overlay, sheet slides up from bottom
     <div className="fixed inset-0 z-50 flex items-end justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-card rounded-t-3xl border-t border-x border-border p-5 pb-10 animate-fade-in">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
-        {/* Header */}
-        <div className="flex items-center justify-between mb-5">
+      {/* Sheet — scrollable, max 85vh so it never clips */}
+      <div className="relative w-full max-w-lg bg-card rounded-t-3xl border-t border-x border-border flex flex-col"
+        style={{ maxHeight: "85vh" }}>
+
+        {/* Fixed header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 flex-shrink-0">
           <div>
             <h2 className="text-lg font-bold">
-              {payer === "DeShea" ? "💜" : "💚"} Paid by {payer}
+              {isIndigo ? "💜" : "💚"} Paid by {payer}
             </h2>
             <p className="text-sm text-muted-foreground">{bill.name}</p>
           </div>
@@ -172,7 +152,9 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
           </button>
         </div>
 
-        <div className="space-y-4">
+        {/* Scrollable content */}
+        <div className="overflow-y-auto px-5 pb-2 flex-1 space-y-4">
+
           {/* Amount */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Amount Paid</label>
@@ -210,7 +192,7 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
               </div>
               <button
                 onClick={() => setSplit(!split)}
-                className={`w-12 h-6 rounded-full transition-colors relative ${split ? (color === "indigo" ? "bg-indigo-500" : "bg-emerald-500") : "bg-muted-foreground/30"}`}
+                className={`w-12 h-6 rounded-full transition-colors relative flex-shrink-0 ${split ? (isIndigo ? "bg-indigo-500" : "bg-emerald-500") : "bg-muted-foreground/30"}`}
               >
                 <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${split ? "translate-x-6" : "translate-x-0.5"}`} />
               </button>
@@ -224,8 +206,9 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
                     {[2,3,4,6,8].map((w) => (
                       <button
                         key={w}
+                        type="button"
                         onClick={() => setWeeks(w)}
-                        className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${weeks === w ? (color === "indigo" ? "bg-indigo-500 text-white" : "bg-emerald-500 text-white") : "bg-muted text-muted-foreground"}`}
+                        className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${weeks === w ? (isIndigo ? "bg-indigo-500 text-white" : "bg-emerald-500 text-white") : "bg-muted text-muted-foreground"}`}
                       >
                         {w}
                       </button>
@@ -250,13 +233,16 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
           </div>
 
           {error && (
-            <p className="text-sm text-destructive bg-destructive/10 rounded-xl px-4 py-2">{error}</p>
+            <p className="text-sm text-destructive bg-destructive/10 rounded-xl px-4 py-3">{error}</p>
           )}
+        </div>
 
+        {/* Fixed footer button */}
+        <div className="px-5 pt-3 pb-8 flex-shrink-0">
           <button
             onClick={handleConfirm}
             disabled={loading}
-            className={`w-full py-4 rounded-xl font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50 ${colorClasses}`}
+            className={`w-full py-4 rounded-xl font-bold text-white text-base transition-all active:scale-[0.98] disabled:opacity-50 ${isIndigo ? "bg-indigo-500" : "bg-emerald-500"}`}
           >
             {loading ? (
               <Loader2 className="w-5 h-5 animate-spin mx-auto" />
