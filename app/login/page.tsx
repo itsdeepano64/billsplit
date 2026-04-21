@@ -5,104 +5,69 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"DeShea" | "Deepen" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const router = useRouter();
   const supabase = createClient();
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
+  async function handleLogin(person: "DeShea" | "Deepen") {
+    setLoading(person);
     setError(null);
-
     try {
-      if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        router.push("/");
-        router.refresh();
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        setError("Check your email for a confirmation link!");
-      }
+      const email = process.env.NEXT_PUBLIC_SHARED_EMAIL!;
+      const password = process.env.NEXT_PUBLIC_SHARED_PASSWORD!;
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      localStorage.setItem("current_user", person);
+      router.push("/");
+      router.refresh();
     } catch (err: any) {
-      setError(err.message);
+      setError("Login failed. Check environment variables.");
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   }
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-8">
-        {/* Logo / Branding */}
-        <div className="text-center space-y-2">
-          <div className="text-5xl">💰</div>
-          <h1 className="text-3xl font-bold tracking-tight">BillSplit</h1>
-          <p className="text-muted-foreground text-sm">
-            Household bills for DeShea & Deepen
-          </p>
+      <div className="w-full max-w-sm space-y-10">
+        <div className="text-center space-y-3">
+          <div className="text-6xl">💰</div>
+          <h1 className="text-4xl font-bold tracking-tight">BillSplit</h1>
+          <p className="text-muted-foreground">Who's paying today?</p>
         </div>
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-              className="w-full bg-card border border-border rounded-xl px-4 py-4 text-foreground text-base focus:outline-none focus:ring-2 focus:ring-primary/50 touch-target"
-              placeholder="you@example.com"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-              className="w-full bg-card border border-border rounded-xl px-4 py-4 text-foreground text-base focus:outline-none focus:ring-2 focus:ring-primary/50 touch-target"
-              placeholder="••••••••"
-            />
-          </div>
-
-          {error && (
-            <div className="bg-destructive/10 border border-destructive/30 rounded-xl px-4 py-3 text-sm text-destructive">
-              {error}
-            </div>
-          )}
-
+        <div className="space-y-4">
           <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-primary text-primary-foreground rounded-xl py-4 font-semibold text-base touch-target disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+            onClick={() => handleLogin("DeShea")}
+            disabled={!!loading}
+            className="w-full rounded-2xl py-6 flex flex-col items-center gap-2 transition-all active:scale-[0.97] disabled:opacity-60 bg-indigo-500/20 border-2 border-indigo-500/50 hover:bg-indigo-500/30"
           >
-            {loading ? "Loading..." : mode === "signin" ? "Sign In" : "Create Account"}
+            {loading === "DeShea" ? (
+              <div className="w-8 h-8 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+            ) : (
+              <>
+                <span className="text-4xl">💜</span>
+                <span className="text-2xl font-bold text-indigo-300">DeShea</span>
+              </>
+            )}
           </button>
-        </form>
-
-        <button
-          onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-          className="w-full text-center text-sm text-muted-foreground py-2"
-        >
-          {mode === "signin"
-            ? "Don't have an account? Sign up"
-            : "Already have an account? Sign in"}
-        </button>
+          <button
+            onClick={() => handleLogin("Deepen")}
+            disabled={!!loading}
+            className="w-full rounded-2xl py-6 flex flex-col items-center gap-2 transition-all active:scale-[0.97] disabled:opacity-60 bg-emerald-500/20 border-2 border-emerald-500/50 hover:bg-emerald-500/30"
+          >
+            {loading === "Deepen" ? (
+              <div className="w-8 h-8 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
+            ) : (
+              <>
+                <span className="text-4xl">💚</span>
+                <span className="text-2xl font-bold text-emerald-300">Deepen</span>
+              </>
+            )}
+          </button>
+        </div>
+        {error && <p className="text-center text-sm text-destructive">{error}</p>}
+        <p className="text-center text-xs text-muted-foreground">Shared household finances · Private & secure</p>
       </div>
     </div>
   );

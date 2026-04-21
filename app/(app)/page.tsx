@@ -1,103 +1,111 @@
-import { createClient } from "@/lib/supabase/server";
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { createClient } from "@/lib/supabase/client";
 import {
-  formatCurrency,
-  formatShortDate,
-  daysUntilDue,
-  isOverdue,
-  getDueDateBadge,
-  getCategoryEmoji,
-  currentMonthBounds,
+  formatCurrency, formatShortDate, daysUntilDue,
+  isOverdue, getDueDateBadge, getCategoryEmoji, currentMonthBounds,
 } from "@/lib/utils";
 import type { Bill, Payment } from "@/lib/types";
 import QuickPayButtons from "@/components/QuickPayButtons";
-import { parseISO, format } from "date-fns";
+import { format } from "date-fns";
+import { RefreshCw } from "lucide-react";
 
-export const dynamic = "force-dynamic";
+export default function DashboardPage() {
+  const supabase = createClient();
+  const [bills, setBills] = useState<Bill[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<string>("there");
 
-export default async function DashboardPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setCurrentUser(localStorage.getItem("current_user") ?? "there");
+    }
+  }, []);
 
-  // Fetch all bills ordered by next_due_date
-  const { data: bills } = await supabase
-    .from("bills")
-    .select("*")
-    .order("next_due_date", { ascending: true });
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    const [billsRes, paymentsRes] = await Promise.all([
+      supabase.from("bills").select("*").order("next_due_date", { ascending: true }),
+      supabase.from("payments").select("*, bill:bills(name)").gte("paid_date", currentMonthBounds().start).lte("paid_date", currentMonthBounds().end),
+    ]);
+    setBills(billsRes.data ?? []);
+    setPayments(paymentsRes.data ?? []);
+    setLoading(false);
+  }, []);
 
-  // Fetch this month's payments
-  const { start, end } = currentMonthBounds();
-  const { data: monthPayments } = await supabase
-    .from("payments")
-    .select("*, bill:bills(name)")
-    .gte("paid_date", start)
-    .lte("paid_date", end);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  const allBills: Bill[] = bills ?? [];
-  const payments: Payment[] = monthPayments ?? [];
-
-  // Categorize bills
   const today = new Date();
-  const in30Days = new Date(today);
-  in30Days.setDate(today.getDate() + 30);
+  const overdueBills = bills.filter((b) => isOverdue(b.next_due_date));
+  const upcomingBills = bills.filter((b) => { const d = daysUntilDue(b.next_due_date); return d >= 0 && d <= 30; });
+  const allClear = overdueBills.length === 0 && upcomingBills.length === 0;
 
-  const overdueBills = allBills.filter((b) => isOverdue(b.next_due_date));
-  const upcomingBills = allBills.filter((b) => {
-    const d = daysUntilDue(b.next_due_date);
-    return d >= 0 && d <= 30;
-  });
-
-  // Monthly summary
   const totalPaid = payments.reduce((s, p) => s + p.amount_paid, 0);
   const paidByDeshea = payments.filter((p) => p.paid_by === "DeShea").reduce((s, p) => s + p.amount_paid, 0);
   const paidByDeepen = payments.filter((p) => p.paid_by === "Deepen").reduce((s, p) => s + p.amount_paid, 0);
-  const balance = paidByDeshea - paidByDeepen; // positive = DeShea paid more
-
-  const monthLabel = format(today, "MMMM yyyy");
+  const balance = paidByDeshea - paidByDeepen;
 
   return (
-    <div className="px-4 pt-6 pb-4 space-y-6 max-w-lg mx-auto animate-fade-in">
+    <div className="px-4 pt-6 pb-4 space-y-6 max-w-lg mx-auto">
       {/* Header */}
-      <div>
-        <p className="text-muted-foreground text-sm">{format(today, "EEEE, MMMM d")}</p>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-muted-foreground text-sm">{format(today, "EEEE, MMMM d")}</p>
+          <h1 className="text-2xl font-bold tracking-tight">Hey {currentUser} 👋</h1>
+        </div>
+        <button onClick={fetchData} disabled={loading} className="w-9 h-9 flex items-center justify-center rounded-full bg-muted text-muted-foreground disabled:opacity-50">
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+        </button>
       </div>
 
-      {/* Month Summary Cards */}
+      {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-card rounded-2xl p-4 border border-border">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">This Month</p>
-          <p className="text-2xl font-bold">{formatCurrency(totalPaid)}</p>
-          <p className="text-xs text-muted-foreground mt-1">{payments.length} bills paid</p>
+        <div className="bg-card rounded-2xl p-4 border border-border col-span-2">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">This Month Total</p>
+          <p className="text-3xl font-bold">{formatCurrency(totalPaid)}</p>
+          <p className="text-xs text-muted-foreground mt-1">{payments.length} payments recorded</p>
         </div>
 
         <div className="bg-card rounded-2xl p-4 border border-border">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Balance</p>
-          <p className={`text-2xl font-bold ${balance > 0 ? "text-indigo-400" : balance < 0 ? "text-emerald-400" : "text-foreground"}`}>
-            {formatCurrency(Math.abs(balance))}
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            {balance > 0 ? "DeShea paid more" : balance < 0 ? "Deepen paid more" : "Even"}
-          </p>
-        </div>
-
-        <div className="bg-card rounded-2xl p-4 border border-border col-span-1">
           <div className="flex items-center gap-2 mb-1">
             <div className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
             <p className="text-xs text-muted-foreground uppercase tracking-wide">DeShea</p>
           </div>
-          <p className="text-xl font-semibold text-indigo-400">{formatCurrency(paidByDeshea)}</p>
+          <p className="text-xl font-bold text-indigo-400">{formatCurrency(paidByDeshea)}</p>
         </div>
 
-        <div className="bg-card rounded-2xl p-4 border border-border col-span-1">
+        <div className="bg-card rounded-2xl p-4 border border-border">
           <div className="flex items-center gap-2 mb-1">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Deepen</p>
           </div>
-          <p className="text-xl font-semibold text-emerald-400">{formatCurrency(paidByDeepen)}</p>
+          <p className="text-xl font-bold text-emerald-400">{formatCurrency(paidByDeepen)}</p>
+        </div>
+
+        <div className="bg-card rounded-2xl p-4 border border-border col-span-2">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Balance</p>
+          {balance === 0 ? (
+            <p className="text-xl font-bold text-muted-foreground">Even ✓</p>
+          ) : balance > 0 ? (
+            <p className="text-xl font-bold text-indigo-400">DeShea paid {formatCurrency(balance)} more</p>
+          ) : (
+            <p className="text-xl font-bold text-emerald-400">Deepen paid {formatCurrency(Math.abs(balance))} more</p>
+          )}
         </div>
       </div>
 
-      {/* Overdue Bills */}
+      {/* All clear state */}
+      {allClear && !loading && (
+        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-6 text-center space-y-2">
+          <p className="text-3xl">🎉</p>
+          <p className="font-bold text-emerald-400">All caught up!</p>
+          <p className="text-sm text-muted-foreground">No bills due in the next 30 days</p>
+        </div>
+      )}
+
+      {/* Overdue */}
       {overdueBills.length > 0 && (
         <section>
           <h2 className="text-base font-semibold text-red-400 mb-3 flex items-center gap-2">
@@ -106,42 +114,43 @@ export default async function DashboardPage() {
           </h2>
           <div className="space-y-3">
             {overdueBills.map((bill) => (
-              <BillCard key={bill.id} bill={bill} />
+              <BillCard key={bill.id} bill={bill} onPaid={fetchData} />
             ))}
           </div>
         </section>
       )}
 
-      {/* Upcoming Bills */}
-      <section>
-        <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
-          <span className="text-muted-foreground">Upcoming</span>
-          <span className="text-xs text-muted-foreground font-normal">next 30 days</span>
-        </h2>
-        {upcomingBills.length === 0 ? (
-          <div className="bg-card rounded-2xl border border-border p-6 text-center">
-            <p className="text-muted-foreground text-sm">No bills due in the next 30 days 🎉</p>
-          </div>
-        ) : (
+      {/* Upcoming */}
+      {upcomingBills.length > 0 && (
+        <section>
+          <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
+            <span className="text-muted-foreground">Upcoming</span>
+            <span className="text-xs text-muted-foreground font-normal">next 30 days</span>
+          </h2>
           <div className="space-y-3">
             {upcomingBills.map((bill) => (
-              <BillCard key={bill.id} bill={bill} />
+              <BillCard key={bill.id} bill={bill} onPaid={fetchData} />
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      )}
+
+      {loading && (
+        <div className="flex items-center justify-center py-10">
+          <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      )}
     </div>
   );
 }
 
-function BillCard({ bill }: { bill: Bill }) {
+function BillCard({ bill, onPaid }: { bill: Bill; onPaid: () => void }) {
   const days = daysUntilDue(bill.next_due_date);
   const badge = getDueDateBadge(days);
   const emoji = getCategoryEmoji(bill.category);
 
   return (
     <div className="bg-card rounded-2xl border border-border overflow-hidden">
-      {/* Bill info */}
       <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
           <span className="text-2xl flex-shrink-0 mt-0.5">{emoji}</span>
@@ -157,8 +166,6 @@ function BillCard({ bill }: { bill: Bill }) {
           </span>
         </div>
       </div>
-
-      {/* Quick pay buttons */}
       <QuickPayButtons bill={bill} />
     </div>
   );
