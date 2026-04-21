@@ -33,9 +33,36 @@ export default function PaymentHistoryClient({ payments, bills, months, filters 
     router.push("/history");
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Delete this payment? This cannot be undone.")) return;
+  async function handleDelete(id: string, billId: string) {
+    if (!confirm("Delete this payment? This will reverse the bill back to unpaid.")) return;
+
+    // 1. Get the bill to find its current next_due_date and frequency
+    const { data: bill } = await supabase
+      .from("bills")
+      .select("next_due_date, frequency, due_day")
+      .eq("id", billId)
+      .single();
+
+    // 2. Delete the payment record
     await supabase.from("payments").delete().eq("id", id);
+
+    // 3. Roll back the next_due_date by one period so bill reappears on dashboard
+    if (bill) {
+      const { parseISO, subMonths, subQuarters, subYears, setDate, format } = await import("date-fns");
+      const current = parseISO(bill.next_due_date);
+      let prev: Date;
+      if (bill.frequency === "monthly")    prev = subMonths(current, 1);
+      else if (bill.frequency === "quarterly") prev = subQuarters(current, 1);
+      else                                  prev = subYears(current, 1);
+      // Set to the correct due day
+      const daysInMonth = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).getDate();
+      const safeDay = Math.min(bill.due_day, daysInMonth);
+      prev.setDate(safeDay);
+      await supabase.from("bills").update({
+        next_due_date: format(prev, "yyyy-MM-dd")
+      }).eq("id", billId);
+    }
+
     router.refresh();
   }
 
@@ -152,7 +179,7 @@ export default function PaymentHistoryClient({ payments, bills, months, filters 
                 <button onClick={() => openEdit(p)} className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted">
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => handleDelete(p.id)} className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+                <button onClick={() => handleDelete(p.id, p.bill_id)} className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
