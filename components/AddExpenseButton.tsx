@@ -17,7 +17,7 @@ const CATEGORY_EMOJIS: Record<string, string> = {
   "Entertainment": "🎬", "Clothing": "👕", "Other": "📦"
 };
 
-export default function AddExpenseButton() {
+export default function AddExpenseButton({ onSaved }: { onSaved?: () => void } = {}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -28,12 +28,12 @@ export default function AddExpenseButton() {
         <Plus className="w-4 h-4" strokeWidth={2.5} />
         Add Expense
       </button>
-      {open && <ExpenseSheet onClose={() => setOpen(false)} />}
+      {open && <ExpenseSheet onClose={() => setOpen(false)} onSaved={onSaved} />}
     </>
   );
 }
 
-function ExpenseSheet({ onClose }: { onClose: () => void }) {
+function ExpenseSheet({ onClose, onSaved }: { onClose: () => void; onSaved?: () => void }) {
   const router = useRouter();
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
@@ -68,7 +68,10 @@ function ExpenseSheet({ onClose }: { onClose: () => void }) {
     setLoading(true);
     setError(null);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not logged in");
       const { error: insertError } = await supabase.from("expenses").insert({
+        user_id: user.id,
         paid_by: form.paid_by,
         amount: amt,
         description: form.description.trim(),
@@ -78,6 +81,7 @@ function ExpenseSheet({ onClose }: { onClose: () => void }) {
       });
       if (insertError) throw insertError;
       router.refresh();
+      if (onSaved) onSaved();
       onClose();
     } catch (err: any) {
       setError(err.message);
