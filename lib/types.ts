@@ -51,8 +51,8 @@ export interface Message {
   updated_at: string;
 }
 
-export type TransferDirection = 'DeShea→Deepen' | 'Deepen→DeShea';
-export type TransferMethod = 'OnePay' | 'Bank Transfer' | 'Apple Pay' | 'Cash';
+export type TransferDirection = "DeShea→Deepen" | "Deepen→DeShea";
+export type TransferMethod = "OnePay" | "Bank Transfer" | "Apple Pay" | "Cash";
 
 export interface Transfer {
   id: string;
@@ -62,5 +62,28 @@ export interface Transfer {
   direction: TransferDirection;
   method: TransferMethod;
   notes: string | null;
+  created_at: string;
+}
+
+export interface ExpenseTab {
+  id: string;
+  user_id: string;
+  name: string;
+  owner: "DeShea" | "Deepen" | "shared";
+  position: number;
+  created_at: string;
+}
+
+export interface Expense {
+  id: string;
+  user_id: string;
+  paid_by: Payer;
+  amount: number;
+  description: string;
+  category: string;
+  expense_date: string;
+  notes: string | null;
+  receipt_url: string | null;
+  tab_id: string | null;
   created_at: string;
 }
