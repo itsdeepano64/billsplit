@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -96,12 +96,14 @@ export default function TransfersClient({ transfers }: Props) {
       )}
 
       {/* Log Transfer Modal — keyboard-safe sheet */}
+      {showForm && <BodyScrollLock />}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-end justify-center">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowForm(false)} />
           <div
             className="relative w-full max-w-lg bg-card rounded-t-3xl border-t border-x border-border flex flex-col animate-fade-in"
-            style={{ maxHeight: "92dvh" }}
+            style={{ maxHeight: "min(92dvh, 92vh)" }}
+          onTouchMove={e => e.stopPropagation()}
           >
             {/* Handle + header */}
             <div className="flex items-center justify-between px-5 pt-5 pb-3 flex-shrink-0">
@@ -113,7 +115,7 @@ export default function TransfersClient({ transfers }: Props) {
             </div>
 
             {/* Scrollable form body */}
-            <div className="overflow-y-auto px-5 flex-1" style={{ paddingBottom: "max(2rem, env(safe-area-inset-bottom))" }}>
+            <div className="overflow-y-auto flex-1 px-5" style={{ paddingBottom: "max(2rem, env(safe-area-inset-bottom))", overscrollBehavior: "contain" }}>
               <form onSubmit={handleSubmit} className="space-y-4 pb-2">
                 {/* Amount */}
                 <div className="space-y-1.5">
@@ -185,6 +187,15 @@ export default function TransfersClient({ transfers }: Props) {
       )}
     </div>
   );
+}
+
+function BodyScrollLock() {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+  return null;
 }
 
 const labelCls = "text-xs font-medium text-muted-foreground uppercase tracking-wide";

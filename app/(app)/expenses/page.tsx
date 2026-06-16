@@ -328,14 +328,22 @@ function ExpenseRow({ expense: exp, tabs, onDelete, onEdit, onPreviewReceipt }: 
 function Sheet({ title, onClose, children }: {
   title: string; onClose: () => void; children: React.ReactNode;
 }) {
+  // Lock background scroll while sheet is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         className="relative w-full max-w-lg bg-card rounded-t-3xl border-t border-x border-border flex flex-col animate-fade-in"
-        style={{ maxHeight: "92dvh" }}
+        style={{ maxHeight: "min(92dvh, 92vh)" }}
+        onTouchMove={e => e.stopPropagation()}
       >
-        {/* Fixed header */}
+        {/* Drag handle + header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-3 flex-shrink-0">
           <div className="w-10 h-1 bg-white/20 rounded-full absolute top-3 left-1/2 -translate-x-1/2" />
           <h2 className="text-lg font-bold">{title}</h2>
@@ -343,10 +351,13 @@ function Sheet({ title, onClose, children }: {
             <X className="w-4 h-4" />
           </button>
         </div>
-        {/* Scrollable body */}
+        {/* Scrollable body — overscrollBehavior contains scroll within the sheet */}
         <div
-          className="overflow-y-auto px-5 pb-8 flex-1"
-          style={{ paddingBottom: "max(2rem, env(safe-area-inset-bottom))" }}
+          className="overflow-y-auto flex-1 px-5"
+          style={{
+            paddingBottom: "max(2rem, env(safe-area-inset-bottom))",
+            overscrollBehavior: "contain",
+          }}
         >
           {children}
         </div>
