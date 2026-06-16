@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import type { Bill, Message } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 import {
   LogOut, Download, ChevronRight, RefreshCw,
-  Save, AlertTriangle,
+  Save, AlertTriangle, ImagePlus, Trash2, Check,
 } from "lucide-react";
 
 export default function SettingsClient({
@@ -124,6 +124,9 @@ export default function SettingsClient({
         </button>
       </Section>
 
+      {/* Appearance */}
+      <AppearanceSection />
+
       {/* Message composer — shown to whoever is logged in */}
       {isDeepen && (
         <MessageComposer
@@ -202,6 +205,146 @@ export default function SettingsClient({
   );
 }
 
+// ─── Appearance Section ─────────────────────────────────────────────────────
+
+function AppearanceSection() {
+  const supabase = createClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [currentBgUrl, setCurrentBgUrl] = useState<string | null>(null);
+  const [status, setStatus] = useState<"idle" | "saved" | "removed">("idle");
+
+  useEffect(() => {
+    async function load() {
+      const { data } = await supabase
+        .from("app_settings")
+        .select("value")
+        .eq("key", "home_background_url")
+        .maybeSingle();
+      if (data?.value) setCurrentBgUrl(data.value);
+    }
+    load();
+  }, []);
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const ext = file.name.split(".").pop();
+      const path = `home-bg.${ext}`;
+
+      // Upload to Supabase Storage (bucket: app-assets)
+      const { error: uploadError } = await supabase.storage
+        .from("app-assets")
+        .upload(path, file, { upsert: true, contentType: file.type });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from("app-assets")
+        .getPublicUrl(path);
+
+      const publicUrl = `${urlData.publicUrl}?v=${Date.now()}`;
+
+      // Save to app_settings
+      await supabase.from("app_settings").upsert({
+        user_id: user.id,
+        key: "home_background_url",
+        value: publicUrl,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,key" });
+
+      setCurrentBgUrl(publicUrl);
+      setStatus("saved");
+      setTimeout(() => setStatus("idle"), 3000);
+    } catch (err: any) {
+      alert("Upload failed: " + (err?.message ?? "Unknown error"));
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function handleRemove() {
+    if (!confirm("Remove the home background image?")) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from("app_settings")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("key", "home_background_url");
+    setCurrentBgUrl(null);
+    setStatus("removed");
+    setTimeout(() => setStatus("idle"), 3000);
+  }
+
+  return (
+    <Section title="Appearance">
+      <div className="p-4 space-y-4">
+        <p className="text-xs text-muted-foreground">
+          Upload a photo to use as a blurred background on the login screen — a photo of you two, your cats, your home, etc.
+        </p>
+
+        {currentBgUrl && (
+          <div className="relative rounded-xl overflow-hidden h-32 bg-muted">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={currentBgUrl}
+              alt="Home background preview"
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+              <span className="text-white/70 text-xs font-medium bg-black/40 px-3 py-1.5 rounded-full">Current background</span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleUpload}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50 transition-all"
+          >
+            {uploading ? (
+              <><RefreshCw className="w-4 h-4 animate-spin" /> Uploading…</>
+            ) : status === "saved" ? (
+              <><Check className="w-4 h-4" /> Saved!</>
+            ) : (
+              <><ImagePlus className="w-4 h-4" /> {currentBgUrl ? "Change Photo" : "Upload Photo"}</>
+            )}
+          </button>
+
+          {currentBgUrl && (
+            <button
+              onClick={handleRemove}
+              className="p-3 rounded-xl border border-border text-muted-foreground hover:text-destructive hover:border-destructive/40 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {status === "removed" && (
+          <p className="text-xs text-muted-foreground text-center">Background removed.</p>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 // ─── Reusable message composer ─────────────────────────────────────────────
 
 function MessageComposer({
@@ -217,9 +360,6 @@ function MessageComposer({
   const [text, setText] = useState(existing?.content ?? "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-
-  const accentClass = forUser === "DeShea" ? "text-indigo-400" : "text-emerald-400";
-  const emoji = forUser === "DeShea" ? "💜" : "💚";
 
   async function handleSave() {
     if (!text.trim()) return;

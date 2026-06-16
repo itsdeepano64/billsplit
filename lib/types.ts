@@ -50,3 +50,17 @@ export interface Message {
   created_at: string;
   updated_at: string;
 }
+
+export type TransferDirection = 'DeShea→Deepen' | 'Deepen→DeShea';
+export type TransferMethod = 'OnePay' | 'Bank Transfer' | 'Apple Pay' | 'Cash';
+
+export interface Transfer {
+  id: string;
+  user_id: string;
+  amount: number;
+  transfer_date: string;
+  direction: TransferDirection;
+  method: TransferMethod;
+  notes: string | null;
+  created_at: string;
+}

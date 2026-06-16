@@ -1,14 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const [loading, setLoading] = useState<"DeShea" | "Deepen" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [bgUrl, setBgUrl] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
+
+  useEffect(() => {
+    // Load background image from app_settings
+    async function loadBg() {
+      const { data } = await supabase
+        .from("app_settings")
+        .select("value")
+        .eq("key", "home_background_url")
+        .maybeSingle();
+      if (data?.value) setBgUrl(data.value);
+    }
+    loadBg();
+  }, []);
 
   async function handleLogin(person: "DeShea" | "Deepen") {
     setLoading(person);
@@ -21,7 +35,7 @@ export default function LoginPage() {
       localStorage.setItem("current_user", person);
       router.push("/");
       router.refresh();
-    } catch (err: any) {
+    } catch {
       setError("Login failed. Check environment variables.");
     } finally {
       setLoading(null);
@@ -29,27 +43,49 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-10">
+    <div className="relative min-h-screen flex flex-col items-center justify-center p-6 overflow-hidden bg-[#0a0a0f]">
 
-        <div className="text-center space-y-3">
-          <div className="text-6xl">🏠</div>
-          <h1 className="text-4xl font-bold tracking-tight">Bills</h1>
-          <p className="text-muted-foreground text-sm">Household finances · DeShea & Deepen</p>
+      {/* Background image with blur */}
+      {bgUrl && (
+        <>
+          <div
+            className="absolute inset-0 bg-cover bg-center scale-110"
+            style={{ backgroundImage: `url(${bgUrl})`, filter: "blur(18px) brightness(0.35)", transform: "scale(1.15)" }}
+          />
+          {/* Gradient overlay for depth */}
+          <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60" />
+        </>
+      )}
+
+      {/* Fallback gradient when no image */}
+      {!bgUrl && (
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-950/60 via-[#0a0a0f] to-emerald-950/40" />
+      )}
+
+      {/* Content */}
+      <div className="relative z-10 w-full max-w-sm space-y-10">
+
+        {/* Header */}
+        <div className="text-center space-y-2">
+          <h1 className="text-5xl font-black tracking-tight text-white drop-shadow-lg">Bills</h1>
+          <p className="text-white/50 text-sm font-medium tracking-wide">Household finances · DeShea & Deepen</p>
         </div>
 
+        {/* Login buttons */}
         <div className="space-y-4">
           <button
             onClick={() => handleLogin("DeShea")}
             disabled={!!loading}
-            className="w-full rounded-2xl py-7 flex flex-col items-center gap-2 transition-all active:scale-[0.97] disabled:opacity-60 bg-indigo-500/20 border-2 border-indigo-500/40 hover:bg-indigo-500/30"
+            className="w-full rounded-3xl py-8 flex flex-col items-center gap-2.5 transition-all active:scale-[0.97] disabled:opacity-60
+              bg-indigo-500/20 border border-indigo-400/30 hover:bg-indigo-500/30
+              backdrop-blur-md shadow-xl shadow-indigo-900/20"
           >
             {loading === "DeShea" ? (
-              <div className="w-8 h-8 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+              <div className="w-9 h-9 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
             ) : (
               <>
-                <span className="text-4xl">💜</span>
-                <span className="text-2xl font-bold text-indigo-300">DeShea</span>
+                <span className="text-5xl leading-none drop-shadow">💜</span>
+                <span className="text-2xl font-black text-indigo-200 tracking-tight drop-shadow">DeShea</span>
               </>
             )}
           </button>
@@ -57,21 +93,30 @@ export default function LoginPage() {
           <button
             onClick={() => handleLogin("Deepen")}
             disabled={!!loading}
-            className="w-full rounded-2xl py-7 flex flex-col items-center gap-2 transition-all active:scale-[0.97] disabled:opacity-60 bg-emerald-500/20 border-2 border-emerald-500/40 hover:bg-emerald-500/30"
+            className="w-full rounded-3xl py-8 flex flex-col items-center gap-2.5 transition-all active:scale-[0.97] disabled:opacity-60
+              bg-emerald-500/20 border border-emerald-400/30 hover:bg-emerald-500/30
+              backdrop-blur-md shadow-xl shadow-emerald-900/20"
           >
             {loading === "Deepen" ? (
-              <div className="w-8 h-8 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
+              <div className="w-9 h-9 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
             ) : (
               <>
-                <span className="text-4xl">💚</span>
-                <span className="text-2xl font-bold text-emerald-300">Deepen</span>
+                <span className="text-5xl leading-none drop-shadow">💚</span>
+                <span className="text-2xl font-black text-emerald-200 tracking-tight drop-shadow">Deepen</span>
               </>
             )}
           </button>
         </div>
 
-        {error && <p className="text-center text-sm text-destructive">{error}</p>}
-        <p className="text-center text-xs text-muted-foreground">Private · Shared household account</p>
+        {error && (
+          <p className="text-center text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2">
+            {error}
+          </p>
+        )}
+
+        <p className="text-center text-[11px] text-white/25 font-medium tracking-wider uppercase">
+          Private · Shared household account
+        </p>
       </div>
     </div>
   );
