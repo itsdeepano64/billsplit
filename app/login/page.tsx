@@ -8,6 +8,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState<"DeShea" | "Deepen" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bgUrl, setBgUrl] = useState<string | null>(null);
+  const [bgBlur, setBgBlur] = useState(6);
   const router = useRouter();
   const supabase = createClient();
 
@@ -15,10 +16,13 @@ export default function LoginPage() {
     async function loadBg() {
       const { data } = await supabase
         .from("app_settings")
-        .select("value")
-        .eq("key", "home_background_url")
-        .maybeSingle();
-      if (data?.value) setBgUrl(data.value);
+        .select("key, value")
+        .in("key", ["home_background_url", "home_background_blur"]);
+
+      for (const row of data ?? []) {
+        if (row.key === "home_background_url") setBgUrl(row.value);
+        if (row.key === "home_background_blur") setBgBlur(Number(row.value));
+      }
     }
     loadBg();
   }, []);
@@ -44,18 +48,17 @@ export default function LoginPage() {
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center p-6 overflow-hidden bg-[#0a0a0f]">
 
-      {/* Background image — light blur so photo stays recognizable */}
+      {/* Background image with dynamic blur */}
       {bgUrl && (
         <>
           <div
             className="absolute inset-0 bg-cover bg-center"
             style={{
               backgroundImage: `url(${bgUrl})`,
-              filter: "blur(6px) brightness(0.55)",
+              filter: `blur(${bgBlur}px) brightness(0.55)`,
               transform: "scale(1.06)",
             }}
           />
-          {/* Subtle gradient for readability without killing the photo */}
           <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/10 to-black/50" />
         </>
       )}
@@ -67,15 +70,12 @@ export default function LoginPage() {
 
       {/* Content */}
       <div className="relative z-10 w-full max-w-sm space-y-10">
-
-        {/* Header */}
         <div className="text-center space-y-1">
           <div className="text-5xl mb-1">🏠</div>
           <h1 className="text-5xl font-black tracking-tight text-white drop-shadow-lg">Bills</h1>
           <p className="text-white/50 text-sm font-medium tracking-wide">Household finances · DeShea & Deepen</p>
         </div>
 
-        {/* Login buttons */}
         <div className="space-y-4">
           <button
             onClick={() => handleLogin("DeShea")}

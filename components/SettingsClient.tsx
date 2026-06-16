@@ -213,18 +213,46 @@ function AppearanceSection() {
   const [uploading, setUploading] = useState(false);
   const [currentBgUrl, setCurrentBgUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "saved" | "removed">("idle");
+  const [blur, setBlur] = useState(6);
+  const [savingBlur, setSavingBlur] = useState(false);
+  const blurSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     async function load() {
       const { data } = await supabase
         .from("app_settings")
-        .select("value")
-        .eq("key", "home_background_url")
-        .maybeSingle();
-      if (data?.value) setCurrentBgUrl(data.value);
+        .select("key, value")
+        .in("key", ["home_background_url", "home_background_blur"]);
+      for (const row of data ?? []) {
+        if (row.key === "home_background_url") setCurrentBgUrl(row.value);
+        if (row.key === "home_background_blur") setBlur(Number(row.value));
+      }
     }
     load();
   }, []);
+
+  async function saveBlur(value: number) {
+    setSavingBlur(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      await supabase.from("app_settings").upsert({
+        user_id: user.id,
+        key: "home_background_blur",
+        value: String(value),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,key" });
+    } finally {
+      setSavingBlur(false);
+    }
+  }
+
+  function handleBlurChange(value: number) {
+    setBlur(value);
+    // Debounce saves — only write to DB 600ms after user stops sliding
+    if (blurSaveTimer.current) clearTimeout(blurSaveTimer.current);
+    blurSaveTimer.current = setTimeout(() => saveBlur(value), 600);
+  }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -286,21 +314,61 @@ function AppearanceSection() {
 
   return (
     <Section title="Appearance">
-      <div className="p-4 space-y-4">
+      <div className="p-4 space-y-5">
         <p className="text-xs text-muted-foreground">
-          Upload a photo to use as a blurred background on the login screen — a photo of you two, your cats, your home, etc.
+          Upload a photo for the login screen background — a photo of you two, your cats, your home, etc.
         </p>
 
+        {/* Live preview with dynamic blur */}
         {currentBgUrl && (
-          <div className="relative rounded-xl overflow-hidden h-32 bg-muted">
+          <div className="relative rounded-xl overflow-hidden h-36 bg-muted">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={currentBgUrl}
               alt="Home background preview"
               className="w-full h-full object-cover"
+              style={{ filter: `blur(${blur}px) brightness(0.55)`, transform: "scale(1.06)" }}
             />
-            <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-              <span className="text-white/70 text-xs font-medium bg-black/40 px-3 py-1.5 rounded-full">Current background</span>
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center">
+                <p className="text-2xl">🏠</p>
+                <p className="text-white font-black text-lg drop-shadow">Bills</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Blur slider — only shown when image exists */}
+        {currentBgUrl && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Background Blur
+              </label>
+              <span className="text-xs font-bold text-foreground tabular-nums">
+                {blur}px {savingBlur ? <span className="text-muted-foreground font-normal">saving…</span> : ""}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={20}
+              step={1}
+              value={blur}
+              onChange={e => handleBlurChange(Number(e.target.value))}
+              className="w-full h-2 rounded-full appearance-none cursor-pointer
+                bg-muted
+                [&::-webkit-slider-thumb]:appearance-none
+                [&::-webkit-slider-thumb]:w-5
+                [&::-webkit-slider-thumb]:h-5
+                [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-primary
+                [&::-webkit-slider-thumb]:shadow-md
+                [&::-webkit-slider-thumb]:cursor-pointer"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground/60">
+              <span>None</span>
+              <span>Max</span>
             </div>
           </div>
         )}
