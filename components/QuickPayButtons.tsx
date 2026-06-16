@@ -102,7 +102,7 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
         if (e) throw e;
       }
 
-      const nextDue = advanceDueDate(bill.next_due_date, bill.frequency);
+      const nextDue = advanceDueDate(bill.next_due_date, bill.frequency, bill.due_day);
       await supabase.from("bills").update({ next_due_date: nextDue }).eq("id", bill.id);
       router.refresh();
       onSuccess();

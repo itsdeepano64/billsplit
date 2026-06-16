@@ -77,7 +77,12 @@ export default async function BillsPage() {
                         {badge.label}
                       </span>
                     </div>
-                    {bill.notes && (
+                    {bill.current_balance != null && (
+                      <p className="text-[11px] text-amber-400/80 mt-0.5">
+                        Balance: {formatCurrency(bill.current_balance)}
+                      </p>
+                    )}
+                    {bill.notes && bill.current_balance == null && (
                       <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{bill.notes}</p>
                     )}
                   </div>

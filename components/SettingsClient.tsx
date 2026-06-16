@@ -1,24 +1,41 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import type { Bill } from "@/lib/types";
+import type { Bill, Message } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
-import { LogOut, Download, Sprout, ChevronRight, RefreshCw } from "lucide-react";
+import {
+  LogOut, Download, Sprout, ChevronRight, RefreshCw,
+  MessageSquare, Save, AlertTriangle,
+} from "lucide-react";
 
 export default function SettingsClient({
   user,
   bills,
+  currentMessage,
 }: {
   user: any;
   bills: Bill[];
+  currentMessage: Message | null;
 }) {
   const router = useRouter();
   const supabase = createClient();
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [currentUser, setCurrentUser] = useState<string>("");
+
+  // Message state
+  const [messageText, setMessageText] = useState(currentMessage?.content ?? "");
+  const [savingMessage, setSavingMessage] = useState(false);
+  const [messageSaved, setMessageSaved] = useState(false);
+
+  useEffect(() => {
+    setCurrentUser(localStorage.getItem("current_user") ?? "");
+  }, []);
+
+  const isDeepen = currentUser === "Deepen";
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -68,7 +85,7 @@ export default function SettingsClient({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `billsplit-export-${new Date().toISOString().split("T")[0]}.csv`;
+      a.download = `bills-export-${new Date().toISOString().split("T")[0]}.csv`;
       a.click();
     } finally {
       setExporting(false);
@@ -83,28 +100,115 @@ export default function SettingsClient({
     router.refresh();
   }
 
+  async function handleSaveMessage() {
+    if (!messageText.trim()) return;
+    setSavingMessage(true);
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+
+      if (currentMessage) {
+        await supabase
+          .from("messages")
+          .update({ content: messageText.trim(), updated_at: new Date().toISOString() })
+          .eq("id", currentMessage.id);
+      } else {
+        await supabase
+          .from("messages")
+          .insert({ content: messageText.trim(), user_id: authUser.id });
+      }
+
+      setMessageSaved(true);
+      setTimeout(() => setMessageSaved(false), 3000);
+      router.refresh();
+    } finally {
+      setSavingMessage(false);
+    }
+  }
+
+  async function handleClearMessage() {
+    if (!currentMessage) return;
+    if (!confirm("Remove the message for DeShea?")) return;
+    await supabase.from("messages").delete().eq("id", currentMessage.id);
+    setMessageText("");
+    router.refresh();
+  }
+
   return (
     <div className="space-y-6">
+
       {/* Account */}
       <Section title="Account">
         <div className="px-4 py-3">
           <p className="text-xs text-muted-foreground">Signed in as</p>
           <p className="font-semibold text-sm mt-0.5 truncate">{user?.email}</p>
+          {currentUser && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Browsing as <span className={currentUser === "DeShea" ? "text-indigo-400" : "text-emerald-400"}>
+                {currentUser === "DeShea" ? "💜" : "💚"} {currentUser}
+              </span>
+            </p>
+          )}
         </div>
-        <Divider />
         <button
           onClick={handleSignOut}
-          className="w-full flex items-center gap-3 px-4 py-4 text-destructive touch-target"
+          className="w-full flex items-center gap-3 px-4 py-4 text-destructive border-t border-border"
         >
           <LogOut className="w-4 h-4" />
           <span className="text-sm font-medium">Sign Out</span>
         </button>
       </Section>
 
+      {/* Message for DeShea — Deepen only */}
+      {isDeepen && (
+        <Section title="Message for DeShea">
+          <div className="px-4 py-4 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Write a note that will appear as a banner on the home screen for DeShea.
+            </p>
+            <textarea
+              value={messageText}
+              onChange={(e) => setMessageText(e.target.value)}
+              placeholder="e.g. Hey babe, water bill is due this week 💧"
+              rows={3}
+              maxLength={300}
+              className="w-full bg-muted border border-border rounded-xl px-4 py-3 text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none placeholder:text-muted-foreground/50"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSaveMessage}
+                disabled={savingMessage || !messageText.trim()}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50 transition-all"
+              >
+                {savingMessage ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                {messageSaved ? "Saved!" : "Save Message"}
+              </button>
+              {currentMessage && (
+                <button
+                  onClick={handleClearMessage}
+                  className="px-4 py-2.5 rounded-xl text-sm text-muted-foreground hover:text-destructive transition-colors"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            {currentMessage && (
+              <p className="text-[11px] text-muted-foreground">
+                Last updated {new Date(currentMessage.updated_at).toLocaleDateString()}
+              </p>
+            )}
+          </div>
+        </Section>
+      )}
+
       {/* Default Paid By */}
       <Section title="Default Paid By">
         <p className="px-4 pt-3 pb-1 text-xs text-muted-foreground">
-          Set who usually pays each bill. This is just a default — you can always choose the other person when marking paid.
+          Set who usually pays each bill. You can always choose the other person when recording a payment.
         </p>
         <div className="divide-y divide-border">
           {bills.map((bill) => (
@@ -130,25 +234,9 @@ export default function SettingsClient({
       {/* Data */}
       <Section title="Data">
         <button
-          onClick={handleSeed}
-          disabled={seeding}
-          className="w-full flex items-center gap-3 px-4 py-4 touch-target disabled:opacity-50"
-        >
-          <Sprout className="w-4 h-4 text-emerald-400" />
-          <div className="flex-1 text-left">
-            <p className="text-sm font-medium">Seed Initial Bills</p>
-            <p className="text-xs text-muted-foreground">Import the 16 default household bills</p>
-          </div>
-          {seeding ? <RefreshCw className="w-4 h-4 animate-spin text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
-        </button>
-        {seedMsg && (
-          <p className="px-4 pb-3 text-xs text-emerald-400">{seedMsg}</p>
-        )}
-        <Divider />
-        <button
           onClick={handleExport}
           disabled={exporting}
-          className="w-full flex items-center gap-3 px-4 py-4 touch-target disabled:opacity-50"
+          className="w-full flex items-center gap-3 px-4 py-4 disabled:opacity-50"
         >
           <Download className="w-4 h-4 text-primary" />
           <div className="flex-1 text-left">
@@ -157,9 +245,24 @@ export default function SettingsClient({
           </div>
           <ChevronRight className="w-4 h-4 text-muted-foreground" />
         </button>
+        <button
+          onClick={handleSeed}
+          disabled={seeding}
+          className="w-full flex items-center gap-3 px-4 py-4 border-t border-border disabled:opacity-50 text-muted-foreground"
+        >
+          <AlertTriangle className="w-4 h-4 text-amber-500/70" />
+          <div className="flex-1 text-left">
+            <p className="text-sm font-medium text-muted-foreground">Seed Initial Bills</p>
+            <p className="text-xs text-muted-foreground/60">Import default bills (first-time setup only)</p>
+          </div>
+          {seeding ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4 opacity-50" />}
+        </button>
+        {seedMsg && (
+          <p className="px-4 pb-3 text-xs text-emerald-400">{seedMsg}</p>
+        )}
       </Section>
 
-      <p className="text-center text-xs text-muted-foreground pb-2">BillSplit · Free forever 💚</p>
+      <p className="text-center text-xs text-muted-foreground/40 pb-2">Bills · Household finances</p>
     </div>
   );
 }
@@ -173,8 +276,4 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </div>
     </div>
   );
-}
-
-function Divider() {
-  return <div className="border-t border-border" />;
 }

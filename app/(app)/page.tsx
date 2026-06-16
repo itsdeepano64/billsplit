@@ -6,46 +6,61 @@ import {
   formatCurrency, formatShortDate, daysUntilDue,
   isOverdue, getDueDateBadge, getCategoryEmoji, currentMonthBounds,
 } from "@/lib/utils";
-import type { Bill } from "@/lib/types";
+import type { Bill, Message } from "@/lib/types";
 import QuickPayButtons from "@/components/QuickPayButtons";
 import { format } from "date-fns";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 
 export default function DashboardPage() {
   const supabase = createClient();
   const [bills, setBills] = useState<Bill[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
+  const [message, setMessage] = useState<Message | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<string>("there");
+  const [messageDismissed, setMessageDismissed] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       setCurrentUser(localStorage.getItem("current_user") ?? "there");
+      // Dismiss resets each session (sessionStorage)
+      setMessageDismissed(!!sessionStorage.getItem("msg_dismissed"));
     }
   }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     const { start, end } = currentMonthBounds();
-    const [billsRes, paymentsRes] = await Promise.all([
+    const [billsRes, paymentsRes, messagesRes] = await Promise.all([
       supabase.from("bills").select("*").order("next_due_date", { ascending: true }),
       supabase.from("payments").select("*").gte("paid_date", start).lte("paid_date", end),
+      supabase.from("messages").select("*").order("updated_at", { ascending: false }).limit(1),
     ]);
     setBills(billsRes.data ?? []);
     setPayments(paymentsRes.data ?? []);
+    setMessage(messagesRes.data?.[0] ?? null);
     setLoading(false);
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  function dismissMessage() {
+    setMessageDismissed(true);
+    sessionStorage.setItem("msg_dismissed", "1");
+  }
 
   const today = new Date();
   const overdueBills = bills.filter((b) => isOverdue(b.next_due_date));
   const upcomingBills = bills.filter((b) => { const d = daysUntilDue(b.next_due_date); return d >= 0 && d <= 30; });
   const allClear = overdueBills.length === 0 && upcomingBills.length === 0;
   const totalPaid = payments.reduce((s, p) => s + p.amount_paid, 0);
+  const totalUpcoming = upcomingBills.reduce((s, b) => s + b.amount, 0);
+
+  // Show message banner if: message exists, not dismissed, and current user is DeShea
+  const showMessage = message && !messageDismissed && currentUser === "DeShea";
 
   return (
-    <div className="px-4 pt-6 pb-4 space-y-6 max-w-lg mx-auto">
+    <div className="px-4 pt-6 pb-4 space-y-5 max-w-lg mx-auto">
 
       {/* Header */}
       <div className="flex items-start justify-between">
@@ -59,10 +74,24 @@ export default function DashboardPage() {
         </button>
       </div>
 
+      {/* Message from Deepen banner */}
+      {showMessage && (
+        <div className="bg-indigo-500/10 border border-indigo-500/25 rounded-2xl px-4 py-3 flex items-start gap-3">
+          <span className="text-xl flex-shrink-0 mt-0.5">💚</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-indigo-300 uppercase tracking-wide mb-0.5">Note from Deepen</p>
+            <p className="text-sm text-foreground leading-relaxed">{message!.content}</p>
+          </div>
+          <button onClick={dismissMessage} className="w-6 h-6 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Summary */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-card rounded-2xl p-4 border border-border col-span-2">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Bills Paid This Month</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Paid This Month</p>
           <p className="text-3xl font-bold">{formatCurrency(totalPaid)}</p>
           <p className="text-xs text-muted-foreground mt-1">
             {payments.length} {payments.length === 1 ? "payment" : "payments"} recorded
@@ -75,8 +104,11 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="bg-card rounded-2xl p-4 border border-border">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Upcoming</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Due (30d)</p>
           <p className="text-2xl font-bold">{upcomingBills.length}</p>
+          {totalUpcoming > 0 && (
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(totalUpcoming)}</p>
+          )}
         </div>
       </div>
 
@@ -136,6 +168,11 @@ function BillCard({ bill, onPaid }: { bill: Bill; onPaid: () => void }) {
           <div className="min-w-0">
             <p className="font-semibold text-sm truncate">{bill.name}</p>
             <p className="text-xs text-muted-foreground">{formatShortDate(bill.next_due_date)}</p>
+            {bill.current_balance != null && (
+              <p className="text-[11px] text-amber-400/80 mt-0.5">
+                Balance: {formatCurrency(bill.current_balance)}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">

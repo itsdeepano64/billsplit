@@ -11,6 +11,7 @@ import {
   parseISO,
   format,
   differenceInDays,
+  getDaysInMonth,
 } from "date-fns";
 import type { Frequency } from "./types";
 
@@ -65,10 +66,23 @@ export function advanceByFrequency(date: Date, frequency: Frequency): Date {
   }
 }
 
-/** Advance the next_due_date string by one period */
-export function advanceDueDate(currentDueDate: string, frequency: Frequency): string {
+/**
+ * Advance next_due_date by one period, always snapping back to due_day.
+ * This ensures a temporary date override (e.g. moved from 16th to 20th)
+ * resets to the canonical due_day on the next cycle.
+ */
+export function advanceDueDate(
+  currentDueDate: string,
+  frequency: Frequency,
+  dueDay: number
+): string {
   const current = parseISO(currentDueDate);
-  const next = advanceByFrequency(current, frequency);
+  // Advance by one period from the current (possibly overridden) date
+  const advanced = advanceByFrequency(current, frequency);
+  // Snap back to the canonical due_day (clamped to month length)
+  const daysInMonth = getDaysInMonth(advanced);
+  const safeDay = Math.min(dueDay, daysInMonth);
+  const next = setDate(advanced, safeDay);
   return format(next, "yyyy-MM-dd");
 }
 

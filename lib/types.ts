@@ -11,6 +11,7 @@ export interface Bill {
   notes: string | null;
   default_paid_by: Payer | null;
   next_due_date: string; // ISO date string YYYY-MM-DD
+  current_balance: number | null;
   created_at: string;
   user_id: string;
 }
@@ -39,4 +40,12 @@ export interface BillWithStatus extends Bill {
   isOverdue: boolean;
   daysUntilDue: number;
   lastPayment?: Payment;
+}
+
+export interface Message {
+  id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
 }
