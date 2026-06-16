@@ -13,14 +13,14 @@ export default async function AppLayout({
   if (!user) redirect("/login");
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
-      {/* Main content — bottom padding for nav bar */}
-      <main className="flex-1 overflow-y-auto pb-24 safe-top scroll-container">
+    <>
+      {/* Page content scrolls naturally at the body level */}
+      <main className="min-h-screen bg-background pb-[calc(80px+env(safe-area-inset-bottom))] pt-[env(safe-area-inset-top)]">
         {children}
       </main>
 
-      {/* Fixed bottom navigation */}
+      {/* Fixed bottom navigation — anchored to viewport, not a scroll container */}
       <BottomNav />
-    </div>
+    </>
   );
 }

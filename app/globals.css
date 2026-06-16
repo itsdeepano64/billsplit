@@ -34,18 +34,17 @@
   html {
     @apply scroll-smooth;
     -webkit-text-size-adjust: 100%;
+    /* Prevent scroll on the html element itself */
+    height: 100%;
   }
 
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* Body is the scroll container — prevents nav jump on iOS */
     overscroll-behavior: none;
-  }
-
-  /* Smooth momentum scrolling on iOS */
-  .scroll-container {
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior-y: contain;
+    overscroll-behavior-y: none;
+    min-height: 100%;
   }
 
   /* Remove number input arrows */
