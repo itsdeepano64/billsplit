@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { formatCurrency } from "@/lib/utils";
 import PaymentHistoryClient from "./PaymentHistoryClient";
 import TransfersClient from "./TransfersClient";
@@ -25,9 +24,9 @@ interface Props {
 }
 
 const TABS: { key: Tab; label: string; emoji: string }[] = [
-  { key: "payments", label: "Payments", emoji: "🧾" },
+  { key: "payments",  label: "Payments",  emoji: "🧾" },
   { key: "transfers", label: "Transfers", emoji: "💸" },
-  { key: "stats", label: "Stats", emoji: "📊" },
+  { key: "stats",     label: "Stats",     emoji: "📊" },
 ];
 
 export default function HistoryTabsClient({
@@ -44,13 +43,13 @@ export default function HistoryTabsClient({
   thisMonthByDeepen,
 }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab);
-  const router = useRouter();
 
+  // Update URL silently — no router.push, no server re-render, instant switching
   function switchTab(t: Tab) {
     setTab(t);
-    const params = new URLSearchParams();
-    params.set("tab", t);
-    router.push(`/history?${params.toString()}`);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", t);
+    window.history.replaceState(null, "", url.toString());
   }
 
   const totalPayments = payments.reduce((s, p) => s + p.amount_paid, 0);
@@ -63,11 +62,12 @@ export default function HistoryTabsClient({
           <button
             key={key}
             onClick={() => switchTab(key)}
-            className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 rounded-xl text-xs font-semibold transition-all
-              ${tab === key
+            className={[
+              "flex-1 flex flex-col items-center gap-0.5 py-2.5 rounded-xl text-xs font-semibold",
+              tab === key
                 ? "bg-card border border-border text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-              }`}
+                : "text-muted-foreground",
+            ].join(" ")}
           >
             <span className="text-base leading-none">{emoji}</span>
             <span>{label}</span>
@@ -75,31 +75,28 @@ export default function HistoryTabsClient({
         ))}
       </div>
 
-      {/* Tab content */}
-      {tab === "payments" && (
-        <>
-          <p className="text-sm text-muted-foreground">
-            {payments.length} payments · {formatCurrency(totalPayments)}
-          </p>
-          <PaymentHistoryClient
-            payments={payments}
-            bills={bills}
-            months={months}
-            filters={filters}
-          />
-        </>
-      )}
+      {/* Tab panels — all rendered, only the active one is visible.
+          This avoids remounting on every tab switch (no layout flash, no recharts re-init). */}
+      <div className={tab === "payments" ? undefined : "hidden"}>
+        <p className="text-sm text-muted-foreground mb-4">
+          {payments.length} payments · {formatCurrency(totalPayments)}
+        </p>
+        <PaymentHistoryClient
+          payments={payments}
+          bills={bills}
+          months={months}
+          filters={filters}
+        />
+      </div>
 
-      {tab === "transfers" && (
-        <>
-          <p className="text-sm text-muted-foreground">
-            {transfers.length} transfer{transfers.length !== 1 ? "s" : ""} logged
-          </p>
-          <TransfersClient transfers={transfers} />
-        </>
-      )}
+      <div className={tab === "transfers" ? undefined : "hidden"}>
+        <p className="text-sm text-muted-foreground mb-4">
+          {transfers.length} transfer{transfers.length !== 1 ? "s" : ""} logged
+        </p>
+        <TransfersClient transfers={transfers} />
+      </div>
 
-      {tab === "stats" && (
+      <div className={tab === "stats" ? undefined : "hidden"}>
         <StatsClient
           monthlyData={monthlyData}
           categoryBreakdown={categoryBreakdown}
@@ -107,7 +104,7 @@ export default function HistoryTabsClient({
           thisMonthByDeShea={thisMonthByDeShea}
           thisMonthByDeepen={thisMonthByDeepen}
         />
-      )}
+      </div>
     </div>
   );
 }

@@ -12,7 +12,6 @@ export default function LoginPage() {
   const supabase = createClient();
 
   useEffect(() => {
-    // Load background image from app_settings
     async function loadBg() {
       const { data } = await supabase
         .from("app_settings")
@@ -45,15 +44,19 @@ export default function LoginPage() {
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center p-6 overflow-hidden bg-[#0a0a0f]">
 
-      {/* Background image with blur */}
+      {/* Background image — light blur so photo stays recognizable */}
       {bgUrl && (
         <>
           <div
-            className="absolute inset-0 bg-cover bg-center scale-110"
-            style={{ backgroundImage: `url(${bgUrl})`, filter: "blur(18px) brightness(0.35)", transform: "scale(1.15)" }}
+            className="absolute inset-0 bg-cover bg-center"
+            style={{
+              backgroundImage: `url(${bgUrl})`,
+              filter: "blur(6px) brightness(0.55)",
+              transform: "scale(1.06)",
+            }}
           />
-          {/* Gradient overlay for depth */}
-          <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/60" />
+          {/* Subtle gradient for readability without killing the photo */}
+          <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/10 to-black/50" />
         </>
       )}
 
@@ -66,7 +69,8 @@ export default function LoginPage() {
       <div className="relative z-10 w-full max-w-sm space-y-10">
 
         {/* Header */}
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-1">
+          <div className="text-5xl mb-1">🏠</div>
           <h1 className="text-5xl font-black tracking-tight text-white drop-shadow-lg">Bills</h1>
           <p className="text-white/50 text-sm font-medium tracking-wide">Household finances · DeShea & Deepen</p>
         </div>
