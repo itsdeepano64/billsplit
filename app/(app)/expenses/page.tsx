@@ -562,6 +562,13 @@ function AddTabSheet({ currentUser, onClose, onSaved }: {
   const [owner, setOwner] = useState<"shared" | "DeShea" | "Deepen">("shared");
   const [saving, setSaving] = useState(false);
 
+  // Lock background scroll
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   async function handleSave() {
     if (!name.trim()) return;
     setSaving(true);
@@ -571,51 +578,73 @@ function AddTabSheet({ currentUser, onClose, onSaved }: {
     onSaved();
   }
 
+  // Nav bar height + safe area — sheet sits above it
+  const NAV_HEIGHT = "calc(64px + env(safe-area-inset-bottom, 0px))";
+
   return (
-    <Sheet title="New Tab" onClose={onClose}>
-      <div className="space-y-5">
-        <div className="space-y-1.5">
-          <label className={labelCls}>Tab Name</label>
-          <input
-            type="text"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="e.g. Spark Delivery, Household…"
-            className={inputCls}
-          />
+    <div className="fixed inset-0 z-50 flex items-end justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      {/* Sheet is positioned so its bottom edge sits on top of the nav bar, never behind it */}
+      <div
+        className="relative w-full max-w-lg bg-card rounded-t-3xl border-t border-x border-border flex flex-col animate-fade-in"
+        style={{ bottom: NAV_HEIGHT, marginBottom: 0, position: "absolute", left: 0, right: 0 }}
+      >
+        {/* Handle */}
+        <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mt-3 mb-1 flex-shrink-0" />
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-3 pb-4 flex-shrink-0">
+          <h2 className="text-lg font-bold">New Tab</h2>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-muted">
+            <X className="w-4 h-4" />
+          </button>
         </div>
-        <div className="space-y-1.5">
-          <label className={labelCls}>Visibility</label>
-          <div className="grid grid-cols-3 gap-2">
-            {([
-              { value: "shared", label: "Shared 👫" },
-              { value: "DeShea", label: "💜 DeShea" },
-              { value: "Deepen", label: "💚 Deepen" },
-            ] as const).map(opt => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setOwner(opt.value)}
-                className={`py-3 rounded-xl text-sm font-semibold border-2 transition-all ${
-                  owner === opt.value
-                    ? "bg-primary/20 border-primary text-primary"
-                    : "bg-muted border-border text-muted-foreground"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+
+        {/* All content — no scroll needed, fits in one screen */}
+        <div className="px-5 pb-6 space-y-5">
+          <div className="space-y-1.5">
+            <label className={labelCls}>Tab Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. Spark Delivery, Household…"
+              className={inputCls}
+            />
           </div>
+          <div className="space-y-1.5">
+            <label className={labelCls}>Visibility</label>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { value: "shared", label: "Shared 👫" },
+                { value: "DeShea", label: "💜 DeShea" },
+                { value: "Deepen", label: "💚 Deepen" },
+              ] as const).map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setOwner(opt.value)}
+                  className={`py-3.5 rounded-xl text-sm font-semibold border-2 transition-all ${
+                    owner === opt.value
+                      ? "bg-primary/20 border-primary text-primary"
+                      : "bg-muted border-border text-muted-foreground"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={handleSave}
+            disabled={saving || !name.trim()}
+            className="w-full bg-primary text-primary-foreground rounded-xl py-4 font-bold text-base disabled:opacity-50 transition-all active:scale-[0.98]"
+          >
+            {saving ? "Creating…" : "Create Tab"}
+          </button>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving || !name.trim()}
-          className="w-full bg-primary text-primary-foreground rounded-xl py-4 font-bold text-base disabled:opacity-50 transition-all active:scale-[0.98]"
-        >
-          {saving ? "Creating…" : "Create Tab"}
-        </button>
       </div>
-    </Sheet>
+    </div>
   );
 }
 
