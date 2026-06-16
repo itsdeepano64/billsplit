@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
+const ImageCropper = dynamic(() => import("./ImageCropper"), { ssr: false });
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import type { Bill, Message } from "@/lib/types";
@@ -217,6 +219,10 @@ function AppearanceSection() {
   const [savingBlur, setSavingBlur] = useState(false);
   const blurSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Cropper state
+  const [cropSrc, setCropSrc] = useState<string | null>(null);   // object URL of picked file
+  const cropObjectUrl = useRef<string | null>(null);              // track for cleanup
+
   useEffect(() => {
     async function load() {
       const { data } = await supabase
@@ -229,6 +235,8 @@ function AppearanceSection() {
       }
     }
     load();
+    // Cleanup any lingering object URL on unmount
+    return () => { if (cropObjectUrl.current) URL.revokeObjectURL(cropObjectUrl.current); };
   }, []);
 
   async function saveBlur(value: number) {
@@ -249,45 +257,42 @@ function AppearanceSection() {
 
   function handleBlurChange(value: number) {
     setBlur(value);
-    // Debounce saves — only write to DB 600ms after user stops sliding
     if (blurSaveTimer.current) clearTimeout(blurSaveTimer.current);
     blurSaveTimer.current = setTimeout(() => saveBlur(value), 600);
   }
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  // Step 1: file picked → open cropper
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (cropObjectUrl.current) URL.revokeObjectURL(cropObjectUrl.current);
+    const url = URL.createObjectURL(file);
+    cropObjectUrl.current = url;
+    setCropSrc(url);
+    if (fileRef.current) fileRef.current.value = "";
+  }
 
+  // Step 2: user confirmed crop → upload the cropped blob
+  async function handleCropConfirm(blob: Blob) {
+    setCropSrc(null);
+    if (cropObjectUrl.current) { URL.revokeObjectURL(cropObjectUrl.current); cropObjectUrl.current = null; }
     setUploading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
-      const ext = file.name.split(".").pop();
-      const path = `home-bg.${ext}`;
-
-      // Upload to Supabase Storage (bucket: app-assets)
+      const path = "home-bg.jpg";
       const { error: uploadError } = await supabase.storage
         .from("app-assets")
-        .upload(path, file, { upsert: true, contentType: file.type });
-
+        .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
       if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from("app-assets")
-        .getPublicUrl(path);
-
+      const { data: urlData } = supabase.storage.from("app-assets").getPublicUrl(path);
       const publicUrl = `${urlData.publicUrl}?v=${Date.now()}`;
-
-      // Save to app_settings
       await supabase.from("app_settings").upsert({
         user_id: user.id,
         key: "home_background_url",
         value: publicUrl,
         updated_at: new Date().toISOString(),
       }, { onConflict: "user_id,key" });
-
       setCurrentBgUrl(publicUrl);
       setStatus("saved");
       setTimeout(() => setStatus("idle"), 3000);
@@ -295,8 +300,12 @@ function AppearanceSection() {
       alert("Upload failed: " + (err?.message ?? "Unknown error"));
     } finally {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
     }
+  }
+
+  function handleCropCancel() {
+    setCropSrc(null);
+    if (cropObjectUrl.current) { URL.revokeObjectURL(cropObjectUrl.current); cropObjectUrl.current = null; }
   }
 
   async function handleRemove() {
@@ -313,6 +322,16 @@ function AppearanceSection() {
   }
 
   return (
+    <>
+    {/* Full-screen cropper — rendered outside the section so it covers everything */}
+    {cropSrc && (
+      <ImageCropper
+        imageSrc={cropSrc}
+        onConfirm={handleCropConfirm}
+        onCancel={handleCropCancel}
+      />
+    )}
+
     <Section title="Appearance">
       <div className="p-4 space-y-5">
         <p className="text-xs text-muted-foreground">
@@ -379,7 +398,7 @@ function AppearanceSection() {
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={handleUpload}
+            onChange={handleFileChange}
           />
           <button
             onClick={() => fileRef.current?.click()}
@@ -410,6 +429,7 @@ function AppearanceSection() {
         )}
       </div>
     </Section>
+    </>
   );
 }
 
