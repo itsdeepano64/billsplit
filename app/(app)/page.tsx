@@ -22,19 +22,21 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      setCurrentUser(localStorage.getItem("current_user") ?? "there");
-      // Dismiss resets each session (sessionStorage)
-      setMessageDismissed(!!sessionStorage.getItem("msg_dismissed"));
+      const cu = localStorage.getItem("current_user") ?? "there";
+      setCurrentUser(cu);
+      setMessageDismissed(!!sessionStorage.getItem(`msg_dismissed_${cu}`));
     }
   }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    const cu = localStorage.getItem("current_user") ?? "";
     const { start, end } = currentMonthBounds();
     const [billsRes, paymentsRes, messagesRes] = await Promise.all([
       supabase.from("bills").select("*").order("next_due_date", { ascending: true }),
       supabase.from("payments").select("*").gte("paid_date", start).lte("paid_date", end),
-      supabase.from("messages").select("*").order("updated_at", { ascending: false }).limit(1),
+      // Fetch the message addressed to the current user
+      supabase.from("messages").select("*").eq("for_user", cu).order("updated_at", { ascending: false }).limit(1),
     ]);
     setBills(billsRes.data ?? []);
     setPayments(paymentsRes.data ?? []);
@@ -46,7 +48,7 @@ export default function DashboardPage() {
 
   function dismissMessage() {
     setMessageDismissed(true);
-    sessionStorage.setItem("msg_dismissed", "1");
+    sessionStorage.setItem(`msg_dismissed_${currentUser}`, "1");
   }
 
   const today = new Date();
@@ -56,8 +58,12 @@ export default function DashboardPage() {
   const totalPaid = payments.reduce((s, p) => s + p.amount_paid, 0);
   const totalUpcoming = upcomingBills.reduce((s, b) => s + b.amount, 0);
 
-  // Show message banner if: message exists, not dismissed, and current user is DeShea
-  const showMessage = message && !messageDismissed && currentUser === "DeShea";
+  const showMessage = message && !messageDismissed;
+  // Determine who the message is from (the other person)
+  const messageFrom = currentUser === "DeShea" ? "Deepen" : "DeShea";
+  const messageFromEmoji = messageFrom === "DeShea" ? "💜" : "💚";
+  const bannerAccent = messageFrom === "DeShea" ? "bg-indigo-500/10 border-indigo-500/25" : "bg-emerald-500/10 border-emerald-500/25";
+  const bannerLabel = messageFrom === "DeShea" ? "text-indigo-300" : "text-emerald-300";
 
   return (
     <div className="px-4 pt-6 pb-4 space-y-5 max-w-lg mx-auto">
@@ -66,7 +72,9 @@ export default function DashboardPage() {
       <div className="flex items-start justify-between">
         <div>
           <p className="text-muted-foreground text-sm">{format(today, "EEEE, MMMM d")}</p>
-          <h1 className="text-2xl font-bold tracking-tight">Hey {currentUser} 👋</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Hey {currentUser === "there" ? "there" : currentUser.split(" ")[0]} 👋
+          </h1>
         </div>
         <button onClick={fetchData} disabled={loading}
           className="w-9 h-9 flex items-center justify-center rounded-full bg-muted text-muted-foreground disabled:opacity-50">
@@ -74,15 +82,18 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Message from Deepen banner */}
+      {/* Message banner */}
       {showMessage && (
-        <div className="bg-indigo-500/10 border border-indigo-500/25 rounded-2xl px-4 py-3 flex items-start gap-3">
-          <span className="text-xl flex-shrink-0 mt-0.5">💚</span>
+        <div className={`border rounded-2xl px-4 py-3 flex items-start gap-3 ${bannerAccent}`}>
+          <span className="text-xl flex-shrink-0 mt-0.5">{messageFromEmoji}</span>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-indigo-300 uppercase tracking-wide mb-0.5">Note from Deepen</p>
+            <p className={`text-xs font-semibold uppercase tracking-wide mb-0.5 ${bannerLabel}`}>
+              Note from {messageFrom}
+            </p>
             <p className="text-sm text-foreground leading-relaxed">{message!.content}</p>
           </div>
-          <button onClick={dismissMessage} className="w-6 h-6 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5">
+          <button onClick={dismissMessage}
+            className="w-6 h-6 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground flex-shrink-0 mt-0.5">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>

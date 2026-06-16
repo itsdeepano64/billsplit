@@ -6,18 +6,20 @@ import { useRouter } from "next/navigation";
 import type { Bill, Message } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 import {
-  LogOut, Download, Sprout, ChevronRight, RefreshCw,
-  MessageSquare, Save, AlertTriangle,
+  LogOut, Download, ChevronRight, RefreshCw,
+  Save, AlertTriangle,
 } from "lucide-react";
 
 export default function SettingsClient({
   user,
   bills,
-  currentMessage,
+  messageForDeShea,
+  messageForDeepen,
 }: {
   user: any;
   bills: Bill[];
-  currentMessage: Message | null;
+  messageForDeShea: Message | null;
+  messageForDeepen: Message | null;
 }) {
   const router = useRouter();
   const supabase = createClient();
@@ -26,16 +28,12 @@ export default function SettingsClient({
   const [exporting, setExporting] = useState(false);
   const [currentUser, setCurrentUser] = useState<string>("");
 
-  // Message state
-  const [messageText, setMessageText] = useState(currentMessage?.content ?? "");
-  const [savingMessage, setSavingMessage] = useState(false);
-  const [messageSaved, setMessageSaved] = useState(false);
-
   useEffect(() => {
     setCurrentUser(localStorage.getItem("current_user") ?? "");
   }, []);
 
   const isDeepen = currentUser === "Deepen";
+  const isDeShea = currentUser === "DeShea";
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -100,40 +98,6 @@ export default function SettingsClient({
     router.refresh();
   }
 
-  async function handleSaveMessage() {
-    if (!messageText.trim()) return;
-    setSavingMessage(true);
-    try {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) return;
-
-      if (currentMessage) {
-        await supabase
-          .from("messages")
-          .update({ content: messageText.trim(), updated_at: new Date().toISOString() })
-          .eq("id", currentMessage.id);
-      } else {
-        await supabase
-          .from("messages")
-          .insert({ content: messageText.trim(), user_id: authUser.id });
-      }
-
-      setMessageSaved(true);
-      setTimeout(() => setMessageSaved(false), 3000);
-      router.refresh();
-    } finally {
-      setSavingMessage(false);
-    }
-  }
-
-  async function handleClearMessage() {
-    if (!currentMessage) return;
-    if (!confirm("Remove the message for DeShea?")) return;
-    await supabase.from("messages").delete().eq("id", currentMessage.id);
-    setMessageText("");
-    router.refresh();
-  }
-
   return (
     <div className="space-y-6">
 
@@ -144,7 +108,8 @@ export default function SettingsClient({
           <p className="font-semibold text-sm mt-0.5 truncate">{user?.email}</p>
           {currentUser && (
             <p className="text-xs text-muted-foreground mt-0.5">
-              Browsing as <span className={currentUser === "DeShea" ? "text-indigo-400" : "text-emerald-400"}>
+              Browsing as{" "}
+              <span className={currentUser === "DeShea" ? "text-indigo-400" : "text-emerald-400"}>
                 {currentUser === "DeShea" ? "💜" : "💚"} {currentUser}
               </span>
             </p>
@@ -159,50 +124,22 @@ export default function SettingsClient({
         </button>
       </Section>
 
-      {/* Message for DeShea — Deepen only */}
+      {/* Message composer — shown to whoever is logged in */}
       {isDeepen && (
-        <Section title="Message for DeShea">
-          <div className="px-4 py-4 space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Write a note that will appear as a banner on the home screen for DeShea.
-            </p>
-            <textarea
-              value={messageText}
-              onChange={(e) => setMessageText(e.target.value)}
-              placeholder="e.g. Hey babe, water bill is due this week 💧"
-              rows={3}
-              maxLength={300}
-              className="w-full bg-muted border border-border rounded-xl px-4 py-3 text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none placeholder:text-muted-foreground/50"
-            />
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleSaveMessage}
-                disabled={savingMessage || !messageText.trim()}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50 transition-all"
-              >
-                {savingMessage ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Save className="w-3.5 h-3.5" />
-                )}
-                {messageSaved ? "Saved!" : "Save Message"}
-              </button>
-              {currentMessage && (
-                <button
-                  onClick={handleClearMessage}
-                  className="px-4 py-2.5 rounded-xl text-sm text-muted-foreground hover:text-destructive transition-colors"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-            {currentMessage && (
-              <p className="text-[11px] text-muted-foreground">
-                Last updated {new Date(currentMessage.updated_at).toLocaleDateString()}
-              </p>
-            )}
-          </div>
-        </Section>
+        <MessageComposer
+          forUser="DeShea"
+          fromUser="Deepen"
+          existing={messageForDeShea}
+          placeholder="e.g. Hey babe, water bill is due this week 💧"
+        />
+      )}
+      {isDeShea && (
+        <MessageComposer
+          forUser="Deepen"
+          fromUser="DeShea"
+          existing={messageForDeepen}
+          placeholder="e.g. Hey babe, can you check on the car insurance? 🚗"
+        />
       )}
 
       {/* Default Paid By */}
@@ -257,13 +194,108 @@ export default function SettingsClient({
           </div>
           {seeding ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4 opacity-50" />}
         </button>
-        {seedMsg && (
-          <p className="px-4 pb-3 text-xs text-emerald-400">{seedMsg}</p>
-        )}
+        {seedMsg && <p className="px-4 pb-3 text-xs text-emerald-400">{seedMsg}</p>}
       </Section>
 
       <p className="text-center text-xs text-muted-foreground/40 pb-2">Bills · Household finances</p>
     </div>
+  );
+}
+
+// ─── Reusable message composer ─────────────────────────────────────────────
+
+function MessageComposer({
+  forUser, fromUser, existing, placeholder,
+}: {
+  forUser: "DeShea" | "Deepen";
+  fromUser: "DeShea" | "Deepen";
+  existing: Message | null;
+  placeholder: string;
+}) {
+  const supabase = createClient();
+  const router = useRouter();
+  const [text, setText] = useState(existing?.content ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const accentClass = forUser === "DeShea" ? "text-indigo-400" : "text-emerald-400";
+  const emoji = forUser === "DeShea" ? "💜" : "💚";
+
+  async function handleSave() {
+    if (!text.trim()) return;
+    setSaving(true);
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+
+      if (existing) {
+        await supabase
+          .from("messages")
+          .update({ content: text.trim(), updated_at: new Date().toISOString() })
+          .eq("id", existing.id);
+      } else {
+        await supabase.from("messages").insert({
+          content: text.trim(),
+          user_id: authUser.id,
+          for_user: forUser,
+        });
+      }
+
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+      router.refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleClear() {
+    if (!existing) return;
+    if (!confirm(`Remove the message for ${forUser}?`)) return;
+    await supabase.from("messages").delete().eq("id", existing.id);
+    setText("");
+    router.refresh();
+  }
+
+  return (
+    <Section title={`Message for ${forUser}`}>
+      <div className="px-4 py-4 space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Write a note that will appear as a banner on {forUser}'s home screen.
+        </p>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={placeholder}
+          rows={3}
+          maxLength={300}
+          className="w-full bg-muted border border-border rounded-xl px-4 py-3 text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none placeholder:text-muted-foreground/50"
+        />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSave}
+            disabled={saving || !text.trim()}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50 transition-all"
+          >
+            {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            {saved ? "Saved!" : "Save Message"}
+          </button>
+          {existing && (
+            <button
+              onClick={handleClear}
+              className="px-4 py-2.5 rounded-xl text-sm text-muted-foreground hover:text-destructive transition-colors"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        {existing && (
+          <p className="text-[11px] text-muted-foreground">
+            Last updated {new Date(existing.updated_at).toLocaleDateString()}
+          </p>
+        )}
+      </div>
+    </Section>
   );
 }
 

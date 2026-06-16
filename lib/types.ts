@@ -10,7 +10,7 @@ export interface Bill {
   category: string;
   notes: string | null;
   default_paid_by: Payer | null;
-  next_due_date: string; // ISO date string YYYY-MM-DD
+  next_due_date: string;
   current_balance: number | null;
   created_at: string;
   user_id: string;
@@ -20,19 +20,19 @@ export interface Payment {
   id: string;
   bill_id: string;
   paid_by: Payer;
-  paid_date: string; // ISO date string
+  paid_date: string;
   amount_paid: number;
   notes: string | null;
   created_at: string;
   user_id: string;
-  bill?: Bill; // joined
+  bill?: Bill;
 }
 
 export interface MonthlySummary {
   total: number;
   byDeshea: number;
   byDeepen: number;
-  balance: number; // positive = DeShea owes Deepen, negative = Deepen owes DeShea
+  balance: number;
   count: number;
 }
 
@@ -45,6 +45,7 @@ export interface BillWithStatus extends Bill {
 export interface Message {
   id: string;
   user_id: string;
+  for_user: "DeShea" | "Deepen";
   content: string;
   created_at: string;
   updated_at: string;

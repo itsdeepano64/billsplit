@@ -8,19 +8,24 @@ export default async function SettingsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   const { data: bills } = await supabase.from("bills").select("*").order("name");
 
-  // Fetch the current message (if any)
+  // Fetch both messages (one for each person)
   const { data: messages } = await supabase
     .from("messages")
     .select("*")
-    .order("updated_at", { ascending: false })
-    .limit(1);
+    .order("updated_at", { ascending: false });
 
-  const currentMessage = messages?.[0] ?? null;
+  const messageForDeShea = messages?.find((m) => m.for_user === "DeShea") ?? null;
+  const messageForDeepen = messages?.find((m) => m.for_user === "Deepen") ?? null;
 
   return (
     <div className="px-4 pt-6 pb-4 space-y-6 max-w-lg mx-auto animate-fade-in">
       <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-      <SettingsClient user={user} bills={bills ?? []} currentMessage={currentMessage} />
+      <SettingsClient
+        user={user}
+        bills={bills ?? []}
+        messageForDeShea={messageForDeShea}
+        messageForDeepen={messageForDeepen}
+      />
     </div>
   );
 }
