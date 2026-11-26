@@ -1,24 +1,30 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/utils";
-import { format, endOfMonth, subMonths } from "date-fns";
+import { format } from "date-fns";
 import {
   Trash2, RefreshCw, Plus, X, Camera, Image as ImageIcon,
-  Eye, Pencil, MoreHorizontal,
+  Eye, Pencil, MoreHorizontal, Users, Lock, BarChart3, Upload, FileText,
 } from "lucide-react";
 import type { ExpenseTab, Expense, Payer } from "@/lib/types";
+import RangeFilter from "@/components/expenses/RangeFilter";
+import {
+  ALL_TIME, type DateRange, rangeLabel, inRange, getCurrentUser, visibleTabs, canSee,
+  isTabShared, updateExpense, insertExpenses, uploadReceipt, isPdf, sum,
+} from "@/lib/expenses";
 
 const EXPENSE_CATEGORIES = [
   "Groceries", "Gas", "Dining Out", "Home & Supplies",
-  "Medical", "Personal", "Entertainment", "Clothing", "Other",
+  "Medical", "Personal", "Entertainment", "Clothing", "Tools", "Other",
 ];
 
 const CATEGORY_EMOJIS: Record<string, string> = {
   "Groceries": "🛒", "Gas": "⛽", "Dining Out": "🍽️",
   "Home & Supplies": "🏠", "Medical": "💊", "Personal": "👤",
-  "Entertainment": "🎬", "Clothing": "👕", "Other": "📦",
+  "Entertainment": "🎬", "Clothing": "👕", "Tools": "🔧", "Other": "📦",
 };
 
 const ALL_TAB_ID = "__all__";
@@ -28,27 +34,20 @@ const ALL_TAB: ExpenseTab = {
 
 export default function ExpensesPage() {
   const supabase = createClient();
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [tabs, setTabs] = useState<ExpenseTab[]>([]);
+  const [allExpenses, setAllExpenses] = useState<Expense[]>([]);
+  const [allTabs, setAllTabs] = useState<ExpenseTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>(ALL_TAB_ID);
   const [loading, setLoading] = useState(true);
-  const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
-  const [currentUser, setCurrentUser] = useState<Payer>("DeShea");
+  const [range, setRange] = useState<DateRange>(ALL_TIME);
+  const [currentUser, setCurrentUser] = useState<Payer>("Deepen");
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showAddTab, setShowAddTab] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [showTabMenu, setShowTabMenu] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const months = Array.from({ length: 6 }, (_, i) => {
-    const d = subMonths(new Date(), i);
-    return { value: format(d, "yyyy-MM"), label: format(d, "MMMM yyyy") };
-  });
-
-  useEffect(() => {
-    const u = (localStorage.getItem("current_user") ?? "DeShea") as Payer;
-    setCurrentUser(u);
-  }, []);
+  useEffect(() => { setCurrentUser(getCurrentUser()); }, []);
 
   const fetchTabs = useCallback(async () => {
     const { data } = await supabase
@@ -56,31 +55,45 @@ export default function ExpensesPage() {
       .select("*")
       .order("position", { ascending: true })
       .order("created_at", { ascending: true });
-    setTabs(data ?? []);
+    setAllTabs((data ?? []) as ExpenseTab[]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchExpenses = useCallback(async () => {
     setLoading(true);
-    const [year, month] = selectedMonth.split("-");
-    const start = `${year}-${month}-01`;
-    const end = format(endOfMonth(new Date(parseInt(year), parseInt(month) - 1)), "yyyy-MM-dd");
-
-    let q = supabase
+    const { data } = await supabase
       .from("expenses")
       .select("*")
-      .gte("expense_date", start)
-      .lte("expense_date", end)
-      .order("expense_date", { ascending: false });
-
-    if (activeTabId !== ALL_TAB_ID) q = q.eq("tab_id", activeTabId);
-
-    const { data } = await q;
-    setExpenses((data ?? []) as Expense[]);
+      .order("expense_date", { ascending: false })
+      .order("created_at", { ascending: false });
+    setAllExpenses(((data ?? []) as Expense[]).map(e => ({ ...e, amount: Number(e.amount) })));
     setLoading(false);
-  }, [selectedMonth, activeTabId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => { fetchTabs(); }, [fetchTabs]);
   useEffect(() => { fetchExpenses(); }, [fetchExpenses]);
+
+  const tabsById = useMemo(() => new Map(allTabs.map(t => [t.id, t])), [allTabs]);
+  const tabs = useMemo(() => visibleTabs(allTabs, currentUser), [allTabs, currentUser]);
+  const visible = useMemo(
+    () => allExpenses.filter(e => canSee(e, tabsById, currentUser)),
+    [allExpenses, tabsById, currentUser],
+  );
+  const inTab = useMemo(
+    () => activeTabId === ALL_TAB_ID ? visible : visible.filter(e => e.tab_id === activeTabId),
+    [visible, activeTabId],
+  );
+  const expenses = useMemo(() => inTab.filter(e => inRange(e, range)), [inTab, range]);
+
+  useEffect(() => {
+    if (activeTabId !== ALL_TAB_ID && !tabs.some(t => t.id === activeTabId)) setActiveTabId(ALL_TAB_ID);
+  }, [tabs, activeTabId]);
+
+  function flash(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  }
 
   async function handleDelete(id: string) {
     if (!confirm("Delete this expense?")) return;
@@ -88,19 +101,51 @@ export default function ExpensesPage() {
     fetchExpenses();
   }
 
+  async function handleToggleShare(exp: Expense) {
+    const next = !exp.shared;
+    setAllExpenses(list => list.map(e => e.id === exp.id ? { ...e, shared: next } : e));
+    const { error } = await updateExpense(supabase, exp.id, { shared: next });
+    if (error) {
+      setAllExpenses(list => list.map(e => e.id === exp.id ? { ...e, shared: !next } : e));
+      flash(error.message ?? "Couldn't update sharing");
+    } else {
+      flash(next ? "Shared with DeShea" : "Hidden from DeShea");
+    }
+  }
+
+  async function handleToggleTabShare(tab: ExpenseTab) {
+    const owner = tab.owner === "shared" ? "Deepen" : "shared";
+    const { error } = await supabase.from("expense_tabs").update({ owner }).eq("id", tab.id);
+    if (error) flash(error.message);
+    else flash(owner === "shared" ? `"${tab.name}" shared with DeShea` : `"${tab.name}" is private`);
+    fetchTabs();
+  }
+
   async function handleDeleteTab(tabId: string) {
     if (!confirm("Delete this tab? Expenses in it will be moved to 'All'.")) return;
+    await supabase.from("expenses").update({ tab_id: null }).eq("tab_id", tabId);
     await supabase.from("expense_tabs").delete().eq("id", tabId);
     if (activeTabId === tabId) setActiveTabId(ALL_TAB_ID);
     fetchTabs();
     fetchExpenses();
   }
 
-  const total = expenses.reduce((s, e) => s + e.amount, 0);
-  const byDeshea = expenses.filter(e => e.paid_by === "DeShea").reduce((s, e) => s + e.amount, 0);
-  const byDeepen = expenses.filter(e => e.paid_by === "Deepen").reduce((s, e) => s + e.amount, 0);
+  const total = sum(expenses);
+  const byDeshea = sum(expenses.filter(e => e.paid_by === "DeShea"));
+  const byDeepen = sum(expenses.filter(e => e.paid_by === "Deepen"));
+  const avg = expenses.length ? total / expenses.length : 0;
+  const biggest = expenses.reduce<Expense | null>((m, e) => (!m || e.amount > m.amount ? e : m), null);
+  const ytdStart = format(new Date(), "yyyy") + "-01-01";
+  const ytd = sum(inTab.filter(e => e.expense_date >= ytdStart));
+  const thisMonthStart = format(new Date(), "yyyy-MM") + "-01";
+  const thisMonth = sum(inTab.filter(e => e.expense_date >= thisMonthStart));
+  const byCategory = Object.entries(
+    expenses.reduce<Record<string, number>>((m, e) => { m[e.category] = (m[e.category] ?? 0) + e.amount; return m; }, {}),
+  ).sort((a, b) => b[1] - a[1]);
+
   const allDisplayTabs = [ALL_TAB, ...tabs];
   const activeTab = allDisplayTabs.find(t => t.id === activeTabId) ?? ALL_TAB;
+  const statsHref = `/expenses/stats${activeTabId !== ALL_TAB_ID ? `?tab=${activeTabId}` : ""}`;
 
   return (
     <div className="pb-4 max-w-lg mx-auto">
@@ -110,12 +155,21 @@ export default function ExpensesPage() {
           <h1 className="text-2xl font-bold tracking-tight">Expenses</h1>
           <div className="flex items-center gap-2">
             <button
-              onClick={fetchExpenses}
+              onClick={() => { fetchTabs(); fetchExpenses(); }}
               disabled={loading}
+              aria-label="Refresh"
               className="w-9 h-9 flex items-center justify-center rounded-full bg-muted text-muted-foreground disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             </button>
+            <Link href={statsHref} aria-label="Stats"
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <BarChart3 className="w-4 h-4" />
+            </Link>
+            <Link href="/expenses/import" aria-label="Bulk import receipts"
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <Upload className="w-4 h-4" />
+            </Link>
             <button
               onClick={() => setShowAddExpense(true)}
               className="flex items-center gap-2 bg-primary/15 border border-primary/30 text-primary rounded-xl px-4 py-2.5 text-sm font-semibold active:scale-[0.97] transition-all"
@@ -127,38 +181,29 @@ export default function ExpensesPage() {
         </div>
 
         {/* Tab bar */}
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-none">
+        <div className="flex gap-2 overflow-x-auto pb-1 pt-1 -mx-1 px-1 scrollbar-none">
           {allDisplayTabs.map((tab) => (
             <div key={tab.id} className="relative flex-shrink-0">
               <button
                 onClick={() => setActiveTabId(tab.id)}
                 className={[
-                  "px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all",
+                  "px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all flex items-center gap-1.5",
                   activeTabId === tab.id
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "bg-muted text-muted-foreground",
                 ].join(" ")}
               >
                 {tab.name}
+                {tab.id !== ALL_TAB_ID && isTabShared(tab) && <Users className="w-3 h-3 opacity-80" />}
               </button>
               {tab.id !== ALL_TAB_ID && activeTabId === tab.id && (
                 <button
                   onClick={() => setShowTabMenu(showTabMenu === tab.id ? null : tab.id)}
+                  aria-label="Tab options"
                   className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-muted border border-border flex items-center justify-center"
                 >
                   <MoreHorizontal className="w-3 h-3 text-muted-foreground" />
                 </button>
-              )}
-              {showTabMenu === tab.id && (
-                <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-xl shadow-xl z-30 overflow-hidden min-w-[140px]">
-                  <button
-                    onClick={() => { handleDeleteTab(tab.id); setShowTabMenu(null); }}
-                    className="w-full flex items-center gap-2 px-4 py-3 text-sm text-destructive"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Delete Tab
-                  </button>
-                </div>
               )}
             </div>
           ))}
@@ -171,26 +216,49 @@ export default function ExpensesPage() {
         </div>
       </div>
 
-      {showTabMenu && (
-        <div className="fixed inset-0 z-20" onClick={() => setShowTabMenu(null)} />
-      )}
+      {showTabMenu && (() => {
+        const tab = tabs.find(t => t.id === showTabMenu);
+        if (!tab) return null;
+        return (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setShowTabMenu(null)} />
+            <div className="fixed left-1/2 -translate-x-1/2 top-32 z-40 bg-card border border-border rounded-2xl shadow-xl overflow-hidden w-[min(90vw,320px)]">
+              <p className="px-4 pt-3 pb-2 text-xs text-muted-foreground truncate">{tab.name}</p>
+              {currentUser === "Deepen" && (
+                <button
+                  onClick={() => { handleToggleTabShare(tab); setShowTabMenu(null); }}
+                  className="w-full flex items-center justify-between gap-2 px-4 py-3 text-sm border-t border-border"
+                >
+                  <span className="flex items-center gap-2"><Users className="w-4 h-4" /> Share tab with DeShea</span>
+                  <Switch on={isTabShared(tab)} />
+                </button>
+              )}
+              <button
+                onClick={() => { handleDeleteTab(tab.id); setShowTabMenu(null); }}
+                className="w-full flex items-center gap-2 px-4 py-3 text-sm text-destructive border-t border-border"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Tab
+              </button>
+            </div>
+          </>
+        );
+      })()}
 
       <div className="px-4 space-y-4 pt-2">
-        <select
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-          className="w-full bg-card border border-border rounded-xl px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-        >
-          {months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-        </select>
+        <RangeFilter value={range} onChange={setRange} />
 
-        {expenses.length > 0 && (
+        {inTab.length > 0 && (
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-card rounded-2xl p-3 border border-border col-span-3">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                {activeTab.name} · Total
+            <div className="bg-card rounded-2xl p-4 border border-border col-span-3">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1 truncate">
+                {activeTab.name} · {rangeLabel(range)}
               </p>
-              <p className="text-2xl font-bold">{formatCurrency(total)}</p>
+              <p className="text-3xl font-bold">{formatCurrency(total)}</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-muted-foreground">
+                <span>YTD <span className="text-foreground font-semibold">{formatCurrency(ytd)}</span></span>
+                <span>This month <span className="text-foreground font-semibold">{formatCurrency(thisMonth)}</span></span>
+              </div>
             </div>
             <div className="bg-card rounded-2xl p-3 border border-indigo-500/20 bg-indigo-500/5">
               <div className="flex items-center gap-1.5 mb-1">
@@ -210,6 +278,35 @@ export default function ExpensesPage() {
               <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Count</p>
               <p className="text-base font-bold">{expenses.length}</p>
             </div>
+            <div className="bg-card rounded-2xl p-3 border border-border col-span-1">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Average</p>
+              <p className="text-base font-bold">{formatCurrency(avg)}</p>
+            </div>
+            <div className="bg-card rounded-2xl p-3 border border-border col-span-2 min-w-0">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Biggest</p>
+              <p className="text-sm font-bold truncate">
+                {biggest ? `${formatCurrency(biggest.amount)} · ${biggest.description}` : "—"}
+              </p>
+            </div>
+            {byCategory.length > 0 && (
+              <div className="bg-card rounded-2xl p-3 border border-border col-span-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">By category</p>
+                  <Link href={statsHref} className="text-[11px] text-primary font-semibold">More stats →</Link>
+                </div>
+                {byCategory.slice(0, 5).map(([cat, amt]) => (
+                  <div key={cat} className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span>{CATEGORY_EMOJIS[cat] ?? "📦"} {cat}</span>
+                      <span className="font-semibold">{formatCurrency(amt)}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full bg-primary/70 rounded-full" style={{ width: `${total ? (amt / total) * 100 : 0}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -220,8 +317,10 @@ export default function ExpensesPage() {
         ) : expenses.length === 0 ? (
           <div className="bg-card rounded-2xl border border-border p-10 text-center space-y-3">
             <p className="text-4xl">🛒</p>
-            <p className="font-semibold">No expenses this month</p>
-            <p className="text-sm text-muted-foreground">Tap Add to record one</p>
+            <p className="font-semibold">{inTab.length === 0 ? "No expenses yet" : "Nothing in this date range"}</p>
+            <p className="text-sm text-muted-foreground">
+              {inTab.length === 0 ? "Tap Add, or bulk import receipts" : "Try a different filter"}
+            </p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -229,15 +328,27 @@ export default function ExpensesPage() {
               <ExpenseRow
                 key={exp.id}
                 expense={exp}
-                tabs={tabs}
+                tabs={allTabs}
+                canShare={currentUser === "Deepen"}
                 onDelete={() => handleDelete(exp.id)}
                 onEdit={() => setEditingExpense(exp)}
-                onPreviewReceipt={() => exp.receipt_url && setPreviewUrl(exp.receipt_url)}
+                onToggleShare={() => handleToggleShare(exp)}
+                onPreviewReceipt={() => {
+                  if (!exp.receipt_url) return;
+                  if (isPdf(exp.receipt_url)) window.open(exp.receipt_url, "_blank", "noopener");
+                  else setPreviewUrl(exp.receipt_url);
+                }}
               />
             ))}
           </div>
         )}
       </div>
+
+      {toast && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-24 z-50 bg-card border border-border rounded-xl px-4 py-2 text-sm shadow-xl">
+          {toast}
+        </div>
+      )}
 
       {showAddExpense && (
         <ExpenseSheet
@@ -271,22 +382,34 @@ export default function ExpensesPage() {
   );
 }
 
+function Switch({ on }: { on: boolean }) {
+  return (
+    <span className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors ${on ? "bg-primary" : "bg-muted-foreground/30"}`}>
+      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
+    </span>
+  );
+}
+
 // ─── Expense Row ──────────────────────────────────────────────────────────────
 
-function ExpenseRow({ expense: exp, tabs, onDelete, onEdit, onPreviewReceipt }: {
-  expense: Expense; tabs: ExpenseTab[];
-  onDelete: () => void; onEdit: () => void; onPreviewReceipt: () => void;
+function ExpenseRow({ expense: exp, tabs, canShare, onDelete, onEdit, onToggleShare, onPreviewReceipt }: {
+  expense: Expense; tabs: ExpenseTab[]; canShare: boolean;
+  onDelete: () => void; onEdit: () => void; onToggleShare: () => void; onPreviewReceipt: () => void;
 }) {
   const tabName = tabs.find(t => t.id === exp.tab_id)?.name;
+  const pdf = isPdf(exp.receipt_url);
   return (
     <div className="bg-card rounded-2xl border border-border px-4 py-3 flex items-center gap-3">
       <button
         onClick={exp.receipt_url ? onPreviewReceipt : undefined}
+        aria-label={exp.receipt_url ? "View receipt" : undefined}
         className={`flex-shrink-0 w-11 h-11 rounded-xl overflow-hidden flex items-center justify-center text-2xl ${exp.receipt_url ? "bg-muted" : ""}`}
       >
         {exp.receipt_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={exp.receipt_url} alt="Receipt" className="w-full h-full object-cover" />
+          pdf ? <FileText className="w-5 h-5 text-muted-foreground" /> : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={exp.receipt_url} alt="Receipt" className="w-full h-full object-cover" />
+          )
         ) : (CATEGORY_EMOJIS[exp.category] ?? "📦")}
       </button>
       <div className="flex-1 min-w-0">
@@ -297,23 +420,35 @@ function ExpenseRow({ expense: exp, tabs, onDelete, onEdit, onPreviewReceipt }: 
           </span>
           <p className="text-xs text-muted-foreground">{exp.category}</p>
           <p className="text-xs text-muted-foreground">
-            {format(new Date(exp.expense_date + "T12:00:00"), "MMM d")}
+            {format(new Date(exp.expense_date + "T12:00:00"), "MMM d, yyyy")}
           </p>
-          {tabName && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{tabName}</span>}
+          {tabName && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground truncate max-w-[140px]">{tabName}</span>
+          )}
         </div>
         {exp.notes && <p className="text-xs text-muted-foreground mt-0.5 truncate">{exp.notes}</p>}
         {exp.receipt_url && (
           <button onClick={onPreviewReceipt} className="flex items-center gap-1 mt-0.5 text-[10px] text-primary">
-            <Eye className="w-3 h-3" /> View receipt
+            <Eye className="w-3 h-3" /> View receipt{pdf ? " (PDF)" : ""}
           </button>
         )}
       </div>
       <div className="flex items-center gap-1 flex-shrink-0">
         <p className="font-bold text-sm">{formatCurrency(exp.amount)}</p>
-        <button onClick={onEdit} className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted">
+        {canShare && exp.paid_by === "Deepen" && (
+          <button
+            onClick={onToggleShare}
+            aria-label={exp.shared ? "Shared with DeShea, tap to hide" : "Private, tap to share with DeShea"}
+            title={exp.shared ? "Shared with DeShea" : "Private"}
+            className={`w-7 h-7 flex items-center justify-center rounded-lg ${exp.shared ? "text-indigo-400 bg-indigo-500/10" : "text-muted-foreground hover:bg-muted"}`}
+          >
+            {exp.shared ? <Users className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+          </button>
+        )}
+        <button onClick={onEdit} aria-label="Edit" className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted">
           <Pencil className="w-3.5 h-3.5" />
         </button>
-        <button onClick={onDelete} className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+        <button onClick={onDelete} aria-label="Delete" className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10">
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -387,6 +522,9 @@ function ExpenseSheet({ tabs, currentUser, defaultTabId, editing, onClose, onSav
     notes: editing?.notes ?? "",
     tab_id: editing?.tab_id ?? defaultTabId ?? null as string | null,
     receipt_url: editing?.receipt_url ?? null as string | null,
+    receipt_path: editing?.receipt_path ?? null as string | null,
+    vendor: editing?.vendor ?? "",
+    shared: editing?.shared ?? (currentUser === "DeShea"),
   });
 
   function set(field: string, value: any) { setForm(f => ({ ...f, [field]: value })); }
@@ -395,12 +533,9 @@ function ExpenseSheet({ tabs, currentUser, defaultTabId, editing, onClose, onSav
     if (!file) return;
     setUploadingReceipt(true);
     try {
-      const ext = file.name.split(".").pop() ?? "jpg";
-      const path = `receipts/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("receipts").upload(path, file, { contentType: file.type, upsert: false });
-      if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from("receipts").getPublicUrl(path);
-      set("receipt_url", urlData.publicUrl);
+      const { url, path } = await uploadReceipt(supabase, file);
+      set("receipt_url", url);
+      set("receipt_path", path);
     } catch (e: any) {
       setError("Receipt upload failed: " + (e?.message ?? "Unknown"));
     } finally { setUploadingReceipt(false); }
@@ -419,12 +554,13 @@ function ExpenseSheet({ tabs, currentUser, defaultTabId, editing, onClose, onSav
         paid_by: form.paid_by, amount: amt, description: form.description.trim(),
         category: form.category, expense_date: form.expense_date,
         notes: form.notes.trim() || null, tab_id: form.tab_id || null, receipt_url: form.receipt_url || null,
+        receipt_path: form.receipt_path || null, vendor: form.vendor.trim() || null, shared: !!form.shared,
       };
       if (editing) {
-        const { error: e } = await supabase.from("expenses").update(payload).eq("id", editing.id);
+        const { error: e } = await updateExpense(supabase, editing.id, payload);
         if (e) throw e;
       } else {
-        const { error: e } = await supabase.from("expenses").insert({ ...payload, user_id: user.id });
+        const { error: e } = await insertExpenses(supabase, [{ ...payload, user_id: user.id, source: "manual" }]);
         if (e) throw e;
       }
       onSaved(); onClose();
@@ -470,6 +606,13 @@ function ExpenseSheet({ tabs, currentUser, defaultTabId, editing, onClose, onSav
             className={inputCls} />
         </div>
 
+        {/* Vendor */}
+        <div className="space-y-1.5">
+          <label className={labelCls}>Store / vendor (optional)</label>
+          <input type="text" value={form.vendor} onChange={e => set("vendor", e.target.value)}
+            placeholder="e.g. Home Depot" className={inputCls} />
+        </div>
+
         {/* Category */}
         <div className="space-y-1.5">
           <label className={labelCls}>Category</label>
@@ -508,16 +651,23 @@ function ExpenseSheet({ tabs, currentUser, defaultTabId, editing, onClose, onSav
           <label className={labelCls}>Receipt (optional)</label>
           {form.receipt_url ? (
             <div className="relative rounded-xl overflow-hidden">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={form.receipt_url} alt="Receipt preview" className="w-full max-h-48 object-cover rounded-xl" />
-              <button type="button" onClick={() => set("receipt_url", null)}
+              {isPdf(form.receipt_url) ? (
+                <a href={form.receipt_url} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2 bg-muted border border-border rounded-xl px-4 py-4 text-sm">
+                  <FileText className="w-5 h-5" /> PDF receipt attached
+                </a>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={form.receipt_url} alt="Receipt preview" className="w-full max-h-48 object-cover rounded-xl" />
+              )}
+              <button type="button" onClick={() => { set("receipt_url", null); set("receipt_path", null); }}
                 className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 flex items-center justify-center">
                 <X className="w-3.5 h-3.5 text-white" />
               </button>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
+              <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; if (f) handleReceiptUpload(f); }} />
               <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; if (f) handleReceiptUpload(f); }} />
@@ -533,6 +683,21 @@ function ExpenseSheet({ tabs, currentUser, defaultTabId, editing, onClose, onSav
             </div>
           )}
         </div>
+
+        {/* Share */}
+        {form.paid_by === "Deepen" && currentUser === "Deepen" && (
+          <button type="button" onClick={() => set("shared", !form.shared)}
+            className="w-full flex items-center justify-between gap-3 bg-muted border border-border rounded-xl px-4 py-3 text-sm">
+            <span className="flex items-center gap-2 text-left">
+              {form.shared ? <Users className="w-4 h-4 text-indigo-400" /> : <Lock className="w-4 h-4 text-muted-foreground" />}
+              <span>
+                <span className="font-semibold block">Share with DeShea</span>
+                <span className="text-xs text-muted-foreground">{form.shared ? "DeShea can see this" : "Only you can see this"}</span>
+              </span>
+            </span>
+            <Switch on={!!form.shared} />
+          </button>
+        )}
 
         {/* Notes */}
         <div className="space-y-1.5">

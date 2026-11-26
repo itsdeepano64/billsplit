@@ -86,4 +86,10 @@ export interface Expense {
   receipt_url: string | null;
   tab_id: string | null;
   created_at: string;
+  // Added by supabase/migrations/20261126000000_expenses_upgrade.sql (may be undefined before it runs)
+  shared?: boolean;
+  vendor?: string | null;
+  source?: "manual" | "bulk_upload" | "email";
+  source_ref?: string | null;
+  receipt_path?: string | null;
 }
