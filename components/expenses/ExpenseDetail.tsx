@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { X, Eye, Pencil, ExternalLink, Package, Users, Lock } from "lucide-react";
 import type { Expense, ExpenseTab } from "@/lib/types";
@@ -21,7 +21,7 @@ export function ItemImage({ src, alt, className }: { src?: string | null; alt: s
   return (
     // Plain <img> so external store images load without next/image remote patterns.
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={alt} loading="lazy" referrerPolicy="no-referrer"
+    <img src={src} alt={alt} referrerPolicy="no-referrer"
       className={`object-contain bg-white ${className ?? ""}`} onError={() => setFailed(true)} />
   );
 }
@@ -33,6 +33,9 @@ export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPre
   onEdit: () => void;
   onPreviewReceipt: () => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Always open at the top (never restored/anchored to the bottom).
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, [e.id]);
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -52,8 +55,8 @@ export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPre
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true" aria-label="Expense details">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative w-full max-w-lg bg-card rounded-t-3xl sm:rounded-3xl border border-border flex flex-col animate-fade-in"
-        style={{ maxHeight: "min(92dvh, 92vh)" }}
+        className="relative w-full max-w-lg bg-card rounded-t-3xl sm:rounded-3xl border border-border flex flex-col overflow-hidden animate-fade-in"
+        style={{ height: "min(92vh, 92dvh)", maxHeight: "92vh" }}
       >
         <div className="flex items-start gap-3 px-5 pt-5 pb-3 flex-shrink-0">
           <div className="w-10 h-1 bg-white/20 rounded-full absolute top-3 left-1/2 -translate-x-1/2 sm:hidden" />
@@ -73,7 +76,8 @@ export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPre
           </button>
         </div>
 
-        <div className="overflow-y-auto flex-1 px-5 space-y-4" style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))", overscrollBehavior: "contain" }}>
+        <div ref={scrollRef} className="overflow-y-auto flex-1 min-h-0 px-5 space-y-4"
+          style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>
           {/* Order facts */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             {e.store && <Fact label="Store" value={e.store} wide />}
@@ -89,20 +93,30 @@ export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPre
             )}
           </div>
 
-          {/* Items */}
+          {/* Items: everything counted first, then a clearly separate "Not counted" section */}
           {items.length > 0 ? (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Items</p>
-              <div className="grid grid-cols-2 gap-2">
-                {included.map((it, idx) => <ItemCard key={`i${idx}`} item={it} />)}
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                  Items ({included.length}{itemCount !== included.length ? ` · ${itemCount} units` : ""})
+                </p>
+                {included.length > 0 ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {included.map((it, idx) => <ItemCard key={`i${idx}`} item={it} />)}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No counted items on this receipt.</p>
+                )}
               </div>
               {excluded.length > 0 && (
-                <>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide pt-2">Not counted</p>
-                  <div className="grid grid-cols-2 gap-2 opacity-50">
-                    {excluded.map((it, idx) => <ItemCard key={`x${idx}`} item={it} />)}
+                <div className="border-t border-border pt-3">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Not counted ({excluded.length}) <span className="normal-case font-normal">· not part of this expense total</span>
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {excluded.map((it, idx) => <ItemCard key={`x${idx}`} item={it} dim />)}
                   </div>
-                </>
+                </div>
               )}
             </div>
           ) : (
@@ -163,14 +177,15 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
   );
 }
 
-function ItemCard({ item }: { item: ReturnType<typeof itemsOf>[number] }) {
+function ItemCard({ item, dim }: { item: ReturnType<typeof itemsOf>[number]; dim?: boolean }) {
   const qty = Number(item.qty) || 1;
   const body = (
     <>
-      <div className="aspect-square w-full rounded-lg overflow-hidden bg-white">
+      {dim && <span className="self-start mb-1.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Not counted</span>}
+      <div className={`aspect-square w-full rounded-lg overflow-hidden bg-white ${dim ? "opacity-50" : ""}`}>
         <ItemImage src={item.image_url} alt={item.name} className="w-full h-full p-1" />
       </div>
-      <p className="text-xs font-medium leading-snug mt-2 line-clamp-3">{item.name}</p>
+      <p className={`text-xs font-medium leading-snug mt-2 line-clamp-3 ${dim ? "line-through text-muted-foreground" : ""}`}>{item.name}</p>
       {(item.model || item.sku) && (
         <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
           {item.model ? `Model ${item.model}` : ""}{item.model && item.sku ? " · " : ""}{item.sku ? (item.sku.startsWith("UPC") ? item.sku : `SKU ${item.sku}`) : ""}
@@ -186,8 +201,8 @@ function ItemCard({ item }: { item: ReturnType<typeof itemsOf>[number] }) {
     </>
   );
   return item.product_url ? (
-    <a href={item.product_url} target="_blank" rel="noopener noreferrer" className="bg-muted/60 border border-border rounded-xl p-2 flex flex-col">{body}</a>
+    <a href={item.product_url} target="_blank" rel="noopener noreferrer" className="bg-muted/60 border border-border rounded-xl p-2 flex flex-col min-w-0">{body}</a>
   ) : (
-    <div className="bg-muted/60 border border-border rounded-xl p-2 flex flex-col">{body}</div>
+    <div className="bg-muted/60 border border-border rounded-xl p-2 flex flex-col min-w-0">{body}</div>
   );
 }
