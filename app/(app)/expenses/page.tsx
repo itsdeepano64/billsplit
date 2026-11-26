@@ -9,11 +9,14 @@ import {
   Trash2, RefreshCw, Plus, X, Camera, Image as ImageIcon,
   Eye, Pencil, MoreHorizontal, Users, Lock, BarChart3, Upload, FileText,
 } from "lucide-react";
-import type { ExpenseTab, Expense, Payer } from "@/lib/types";
+import type { ExpenseTab, Expense, ExpenseItem, Payer } from "@/lib/types";
+import ExpenseDetail, { ItemImage } from "@/components/expenses/ExpenseDetail";
+import ItemsEditor from "@/components/expenses/ItemsEditor";
 import RangeFilter from "@/components/expenses/RangeFilter";
 import {
   ALL_TIME, type DateRange, rangeLabel, inRange, getCurrentUser, visibleTabs, canSee,
   isTabShared, updateExpense, insertExpenses, uploadReceipt, isPdf, sum,
+  itemsOf, thumbOf, thumbnailForItems, vendorOf,
 } from "@/lib/expenses";
 
 const EXPENSE_CATEGORIES = [
@@ -44,6 +47,7 @@ export default function ExpensesPage() {
   const [showAddTab, setShowAddTab] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
   const [showTabMenu, setShowTabMenu] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -332,6 +336,7 @@ export default function ExpensesPage() {
                 canShare={currentUser === "Deepen"}
                 onDelete={() => handleDelete(exp.id)}
                 onEdit={() => setEditingExpense(exp)}
+                onOpen={() => setDetailExpense(exp)}
                 onToggleShare={() => handleToggleShare(exp)}
                 onPreviewReceipt={() => {
                   if (!exp.receipt_url) return;
@@ -375,6 +380,20 @@ export default function ExpensesPage() {
           onSaved={() => { fetchTabs(); setShowAddTab(false); }}
         />
       )}
+      {detailExpense && (
+        <ExpenseDetail
+          expense={allExpenses.find(x => x.id === detailExpense.id) ?? detailExpense}
+          tabs={allTabs}
+          onClose={() => setDetailExpense(null)}
+          onEdit={() => { setEditingExpense(allExpenses.find(x => x.id === detailExpense.id) ?? detailExpense); setDetailExpense(null); }}
+          onPreviewReceipt={() => {
+            const url = detailExpense.receipt_url;
+            if (!url) return;
+            if (isPdf(url)) window.open(url, "_blank", "noopener");
+            else setPreviewUrl(url);
+          }}
+        />
+      )}
       {previewUrl && (
         <ReceiptPreview url={previewUrl} onClose={() => setPreviewUrl(null)} />
       )}
@@ -392,28 +411,31 @@ function Switch({ on }: { on: boolean }) {
 
 // ─── Expense Row ──────────────────────────────────────────────────────────────
 
-function ExpenseRow({ expense: exp, tabs, canShare, onDelete, onEdit, onToggleShare, onPreviewReceipt }: {
+function ExpenseRow({ expense: exp, tabs, canShare, onDelete, onEdit, onOpen, onToggleShare, onPreviewReceipt }: {
   expense: Expense; tabs: ExpenseTab[]; canShare: boolean;
-  onDelete: () => void; onEdit: () => void; onToggleShare: () => void; onPreviewReceipt: () => void;
+  onDelete: () => void; onEdit: () => void; onOpen: () => void; onToggleShare: () => void; onPreviewReceipt: () => void;
 }) {
   const tabName = tabs.find(t => t.id === exp.tab_id)?.name;
   const pdf = isPdf(exp.receipt_url);
+  const thumb = thumbOf(exp);
+  const items = itemsOf(exp).filter(i => !i.excluded);
+  const itemCount = items.reduce((n, i) => n + (Number(i.qty) || 1), 0);
+  const title = items.length > 0 ? `${vendorOf(exp)} · ${items[0].name}` : exp.description;
   return (
     <div className="bg-card rounded-2xl border border-border px-4 py-3 flex items-center gap-3">
-      <button
-        onClick={exp.receipt_url ? onPreviewReceipt : undefined}
-        aria-label={exp.receipt_url ? "View receipt" : undefined}
-        className={`flex-shrink-0 w-11 h-11 rounded-xl overflow-hidden flex items-center justify-center text-2xl ${exp.receipt_url ? "bg-muted" : ""}`}
-      >
-        {exp.receipt_url ? (
-          pdf ? <FileText className="w-5 h-5 text-muted-foreground" /> : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={exp.receipt_url} alt="Receipt" className="w-full h-full object-cover" />
-          )
+      <button onClick={onOpen} aria-label="View details"
+        className="flex-shrink-0 w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center text-2xl border border-border relative">
+        {thumb ? (
+          <ItemImage src={thumb} alt={title} className="w-full h-full" />
+        ) : exp.receipt_url && pdf ? (
+          <FileText className="w-5 h-5 text-muted-foreground" />
         ) : (CATEGORY_EMOJIS[exp.category] ?? "📦")}
+        {itemCount > 1 && (
+          <span className="absolute bottom-0 right-0 text-[9px] font-bold bg-black/70 text-white rounded-tl-md px-1">{itemCount}</span>
+        )}
       </button>
-      <div className="flex-1 min-w-0">
-        <p className="font-semibold text-sm truncate">{exp.description}</p>
+      <button onClick={onOpen} className="flex-1 min-w-0 text-left">
+        <p className="font-semibold text-sm truncate">{title}</p>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${exp.paid_by === "DeShea" ? "bg-indigo-500/20 text-indigo-400" : "bg-emerald-500/20 text-emerald-400"}`}>
             {exp.paid_by}
@@ -426,15 +448,20 @@ function ExpenseRow({ expense: exp, tabs, canShare, onDelete, onEdit, onToggleSh
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground truncate max-w-[140px]">{tabName}</span>
           )}
         </div>
-        {exp.notes && <p className="text-xs text-muted-foreground mt-0.5 truncate">{exp.notes}</p>}
-        {exp.receipt_url && (
-          <button onClick={onPreviewReceipt} className="flex items-center gap-1 mt-0.5 text-[10px] text-primary">
-            <Eye className="w-3 h-3" /> View receipt{pdf ? " (PDF)" : ""}
-          </button>
-        )}
-      </div>
+        {items.length > 0 ? (
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">
+            {itemCount} item{itemCount === 1 ? "" : "s"}{items.length > 1 ? ` · +${items.length - 1} more` : ""}{exp.order_number ? ` · #${exp.order_number}` : ""}
+          </p>
+        ) : exp.notes ? <p className="text-xs text-muted-foreground mt-0.5 truncate">{exp.notes}</p> : null}
+      </button>
       <div className="flex items-center gap-1 flex-shrink-0">
         <p className="font-bold text-sm">{formatCurrency(exp.amount)}</p>
+        {exp.receipt_url && (
+          <button onClick={onPreviewReceipt} aria-label={`View receipt${pdf ? " (PDF)" : ""}`} title="View receipt"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-primary hover:bg-muted">
+            <Eye className="w-3.5 h-3.5" />
+          </button>
+        )}
         {canShare && exp.paid_by === "Deepen" && (
           <button
             onClick={onToggleShare}
@@ -526,6 +553,7 @@ function ExpenseSheet({ tabs, currentUser, defaultTabId, editing, onClose, onSav
     vendor: editing?.vendor ?? "",
     shared: editing?.shared ?? (currentUser === "DeShea"),
   });
+  const [items, setItems] = useState<ExpenseItem[]>(editing ? itemsOf(editing) : []);
 
   function set(field: string, value: any) { setForm(f => ({ ...f, [field]: value })); }
 
@@ -556,6 +584,14 @@ function ExpenseSheet({ tabs, currentUser, defaultTabId, editing, onClose, onSav
         notes: form.notes.trim() || null, tab_id: form.tab_id || null, receipt_url: form.receipt_url || null,
         receipt_path: form.receipt_path || null, vendor: form.vendor.trim() || null, shared: !!form.shared,
       };
+      // Optional line items: keep named rows; thumbnail = first item photo (row falls back to the receipt image).
+      const cleanItems = items
+        .filter(i => i.name.trim())
+        .map(i => ({ ...i, name: i.name.trim(), image_url: i.image_url?.trim() || null, product_url: i.product_url?.trim() || null }));
+      const itemsChanged = JSON.stringify(cleanItems) !== JSON.stringify(editing ? itemsOf(editing) : []);
+      if (itemsChanged) {
+        Object.assign(payload, { items: cleanItems, thumbnail_url: thumbnailForItems(cleanItems) });
+      }
       if (editing) {
         const { error: e } = await updateExpense(supabase, editing.id, payload);
         if (e) throw e;
@@ -682,6 +718,12 @@ function ExpenseSheet({ tabs, currentUser, defaultTabId, editing, onClose, onSav
               </button>
             </div>
           )}
+        </div>
+
+        {/* Items */}
+        <div className="space-y-1.5">
+          <label className={labelCls}>Items (optional)</label>
+          <ItemsEditor items={items} onChange={setItems} />
         </div>
 
         {/* Share */}

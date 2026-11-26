@@ -92,4 +92,24 @@ export interface Expense {
   source?: "manual" | "bulk_upload" | "email";
   source_ref?: string | null;
   receipt_path?: string | null;
+  // Added by supabase/migrations/20261126120000_expense_items.sql
+  items?: ExpenseItem[] | null;
+  thumbnail_url?: string | null;
+  order_number?: string | null;
+  store?: string | null;
+  subtotal?: number | null;
+  tax?: number | null;
+}
+
+export interface ExpenseItem {
+  name: string;
+  qty: number;
+  unit_price: number;
+  line_total: number;
+  sku?: string | null;
+  model?: string | null;
+  image_url?: string | null;
+  product_url?: string | null;
+  /** Shown greyed out and not counted in the expense amount (e.g. a non-tool item on a tool receipt). */
+  excluded?: boolean;
 }
