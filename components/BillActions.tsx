@@ -39,7 +39,8 @@ export default function BillActions({ bill }: { bill: Bill }) {
   async function handleDelete() {
     if (!confirm(`Delete "${bill.name}"? This won't delete payment history.`)) return;
     setMenuOpen(false);
-    await supabase.from("bills").delete().eq("id", bill.id);
+    const { error } = await supabase.from("bills").delete().eq("id", bill.id);
+    if (error) { alert(`Couldn't delete "${bill.name}": ${error.message}`); return; }
     router.refresh();
   }
 
@@ -183,7 +184,9 @@ function UpdateBalanceModal({ bill, onClose }: { bill: Bill; onClose: () => void
 
   async function handleClear() {
     setLoading(true);
-    await supabase.from("bills").update({ current_balance: null }).eq("id", bill.id);
+    const { error: e } = await supabase.from("bills").update({ current_balance: null }).eq("id", bill.id);
+    setLoading(false);
+    if (e) { setError(e.message); return; }
     router.refresh();
     onClose();
   }
