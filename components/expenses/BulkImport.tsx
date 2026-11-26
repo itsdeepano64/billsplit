@@ -8,7 +8,9 @@ import { ArrowLeft, Upload, FileText, Trash2, RefreshCw, CheckCircle2, AlertCirc
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/utils";
 import type { ExpenseTab, Payer } from "@/lib/types";
-import { getCurrentUser, visibleTabs, uploadReceipt, insertExpenses } from "@/lib/expenses";
+import { getCurrentUser, visibleTabs, uploadReceipt, insertExpenses, thumbnailForItems } from "@/lib/expenses";
+import ItemsEditor from "@/components/expenses/ItemsEditor";
+import type { ExpenseItem } from "@/lib/types";
 
 interface Row {
   key: string;
@@ -23,6 +25,8 @@ interface Row {
   vendor: string;
   description: string;
   amount: string;
+  items: ExpenseItem[];
+  showItems: boolean;
 }
 
 const inputCls = "w-full bg-muted border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50";
@@ -76,6 +80,8 @@ export default function BulkImport() {
           vendor: "",
           description: /^(img|image|scan|photo|receipt|ereceipt|pxl|dsc)\s*\d*/i.test(guess) ? "" : guess,
           amount: "",
+          items: [],
+          showItems: false,
         },
       };
     });
@@ -118,6 +124,10 @@ export default function BulkImport() {
         receipt_path: r.receipt_path ?? null,
         shared,
         source: "bulk_upload",
+        ...(() => {
+          const items = r.items.filter(i => i.name.trim());
+          return items.length ? { items, thumbnail_url: thumbnailForItems(items) } : {};
+        })(),
       }));
       const { error: e } = await insertExpenses(supabase, payload);
       if (e) throw e;
@@ -232,6 +242,16 @@ export default function BulkImport() {
                 <input placeholder="Tube cutter" value={r.description} onChange={e => patch(r.key, { description: e.target.value })} className={inputCls} />
               </div>
             </div>
+            {r.showItems ? (
+              <div className="space-y-1">
+                <label className={labelCls}>Items (optional)</label>
+                <ItemsEditor items={r.items} onChange={items => patch(r.key, { items })} />
+              </div>
+            ) : (
+              <button type="button" onClick={() => patch(r.key, { showItems: true })} className="text-xs text-primary font-medium">
+                + Add items &amp; product photos (optional)
+              </button>
+            )}
           </div>
         ))}
 

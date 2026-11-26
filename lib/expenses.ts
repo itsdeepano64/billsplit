@@ -4,7 +4,7 @@ import {
   format, startOfMonth, endOfMonth, subMonths, startOfYear, endOfYear, subYears,
 } from "date-fns";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Expense, ExpenseTab, Payer } from "@/lib/types";
+import type { Expense, ExpenseItem, ExpenseTab, Payer } from "@/lib/types";
 
 // ─── Date filter ──────────────────────────────────────────────────────────────
 
@@ -99,7 +99,10 @@ export function canSee(e: Expense, tabsById: Map<string, ExpenseTab>, user: Paye
 
 // ─── Writes that survive a missing migration ─────────────────────────────────
 
-const NEW_COLUMNS = ["shared", "vendor", "source", "source_ref", "receipt_path"] as const;
+const NEW_COLUMNS = [
+  "shared", "vendor", "source", "source_ref", "receipt_path",
+  "items", "thumbnail_url", "order_number", "store", "subtotal", "tax",
+] as const;
 
 function isMissingColumn(err: { code?: string; message?: string } | null) {
   if (!err) return false;
@@ -150,6 +153,43 @@ export async function uploadReceipt(supabase: SupabaseClient, file: File) {
   if (error) throw error;
   const { data } = supabase.storage.from("receipts").getPublicUrl(path);
   return { url: data.publicUrl, path };
+}
+
+// ─── Line items & thumbnails ─────────────────────────────────────────────────
+
+export function itemsOf(e: Expense): ExpenseItem[] {
+  return Array.isArray(e.items) ? e.items : [];
+}
+
+export function isImageUrl(url: string | null | undefined) {
+  return !!url && !isPdf(url);
+}
+
+/** Row thumbnail: stored thumbnail → first item photo → receipt image (not PDF) → null (icon). */
+export function thumbOf(e: Expense): string | null {
+  if (e.thumbnail_url) return e.thumbnail_url;
+  const first = itemsOf(e).find(i => i.image_url && !i.excluded);
+  if (first?.image_url) return first.image_url;
+  if (isImageUrl(e.receipt_url)) return e.receipt_url!;
+  return null;
+}
+
+/** Thumbnail to store when saving items: first included item with a photo, else null (UI falls back to receipt). */
+export function thumbnailForItems(items: ExpenseItem[]): string | null {
+  return items.find(i => i.image_url && !i.excluded)?.image_url ?? null;
+}
+
+/** Best-effort product photo lookup via /api/product-image (product link, image link, or name/SKU). */
+export async function lookupProductImage(input: { url?: string; q?: string }): Promise<string | null> {
+  const params = new URLSearchParams();
+  if (input.url) params.set("url", input.url);
+  if (input.q) params.set("q", input.q);
+  try {
+    const res = await fetch(`/api/product-image?${params}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return typeof j.image === "string" ? j.image : null;
+  } catch { return null; }
 }
 
 // ─── Stats helpers ───────────────────────────────────────────────────────────
