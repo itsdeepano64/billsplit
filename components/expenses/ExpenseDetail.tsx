@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
-import { X, Eye, Pencil, ExternalLink, Package, Users, Lock } from "lucide-react";
+import { X, Eye, Pencil, ExternalLink, Package, Users, Lock, FileText } from "lucide-react";
 import type { Expense, ExpenseTab } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 import { itemsOf, vendorOf, isPdf, thumbOf } from "@/lib/expenses";
@@ -39,9 +39,14 @@ export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPre
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    document.body.classList.add("sheet-open");
     const onKey = (ev: KeyboardEvent) => { if (ev.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
-    return () => { document.body.style.overflow = prev; window.removeEventListener("keydown", onKey); };
+    return () => {
+      document.body.style.overflow = prev;
+      document.body.classList.remove("sheet-open");
+      window.removeEventListener("keydown", onKey);
+    };
   }, [onClose]);
 
   const items = itemsOf(e);
@@ -52,11 +57,11 @@ export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPre
   const hero = thumbOf(e);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true" aria-label="Expense details">
+    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center" role="dialog" aria-modal="true" aria-label="Expense details">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         className="relative w-full max-w-lg bg-card rounded-t-3xl sm:rounded-3xl border border-border flex flex-col overflow-hidden animate-fade-in"
-        style={{ height: "min(92vh, 92dvh)", maxHeight: "92vh" }}
+        style={{ height: "min(92dvh, 100dvh)", maxHeight: "92dvh" }}
       >
         <div className="flex items-start gap-3 px-5 pt-5 pb-3 flex-shrink-0">
           <div className="w-10 h-1 bg-white/20 rounded-full absolute top-3 left-1/2 -translate-x-1/2 sm:hidden" />
@@ -71,13 +76,21 @@ export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPre
               {items.length > 0 && ` · ${itemCount} item${itemCount === 1 ? "" : "s"}`}
             </p>
           </div>
-          <button onClick={onClose} aria-label="Close" className="w-8 h-8 flex items-center justify-center rounded-full bg-muted flex-shrink-0">
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {e.receipt_url && (
+              <button onClick={onPreviewReceipt} aria-label={isPdf(e.receipt_url) ? "View receipt (PDF)" : "View receipt"}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground">
+                {isPdf(e.receipt_url) ? <FileText className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            )}
+            <button onClick={onClose} aria-label="Close" className="w-8 h-8 flex items-center justify-center rounded-full bg-muted">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <div ref={scrollRef} className="overflow-y-auto flex-1 min-h-0 px-5 space-y-4"
-          style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>
+          style={{ overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>
           {/* Order facts */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             {e.store && <Fact label="Store" value={e.store} wide />}
@@ -139,21 +152,25 @@ export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPre
           </div>
 
           {e.notes && <p className="text-xs text-muted-foreground whitespace-pre-wrap">{e.notes}</p>}
+        </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            {e.receipt_url ? (
-              <button onClick={onPreviewReceipt}
-                className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-semibold">
-                <Eye className="w-4 h-4" /> View receipt{isPdf(e.receipt_url) ? " (PDF)" : ""}
-              </button>
-            ) : (
-              <div className="flex items-center justify-center py-3 rounded-xl bg-muted text-xs text-muted-foreground">No receipt file</div>
-            )}
-            <button onClick={onEdit}
-              className="flex items-center justify-center gap-2 py-3 rounded-xl bg-muted border border-border text-sm font-semibold">
-              <Pencil className="w-4 h-4" /> Edit
+        {/* Sticky footer: always visible, padded so it clears the tab bar + iPhone home indicator */}
+        <div
+          className="flex-shrink-0 border-t border-border bg-card px-5 pt-3 grid grid-cols-2 gap-2"
+          style={{ paddingBottom: "calc(var(--app-nav-height, 80px) + env(safe-area-inset-bottom, 0px) + 0.75rem)" }}
+        >
+          {e.receipt_url ? (
+            <button onClick={onPreviewReceipt} data-testid="view-receipt"
+              className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-semibold">
+              <Eye className="w-4 h-4" /> View receipt{isPdf(e.receipt_url) ? " (PDF)" : ""}
             </button>
-          </div>
+          ) : (
+            <div className="flex items-center justify-center py-3 rounded-xl bg-muted text-xs text-muted-foreground">No receipt file</div>
+          )}
+          <button onClick={onEdit} data-testid="edit-expense"
+            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-muted border border-border text-sm font-semibold">
+            <Pencil className="w-4 h-4" /> Edit
+          </button>
         </div>
       </div>
     </div>

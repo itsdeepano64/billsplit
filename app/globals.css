@@ -72,3 +72,18 @@
     -webkit-backdrop-filter: blur(12px);
   }
 }
+
+/* Height of the fixed tab bar (icon + label + py-3), used so sheets sit above it. */
+:root {
+  --app-nav-height: 80px;
+}
+
+/* Hide the tab bar while a sheet is open so it cannot cover or intercept the sheet's buttons.
+   Also drop the reserved nav height so the sticky footer doesn't leave an empty gap. */
+body.sheet-open {
+  --app-nav-height: 0px;
+}
+body.sheet-open .app-bottom-nav {
+  visibility: hidden;
+  pointer-events: none;
+}
