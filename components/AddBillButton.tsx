@@ -35,6 +35,7 @@ export function BillModal({
   const router = useRouter();
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: existing?.name ?? "",
     amount: existing?.amount?.toString() ?? "",
@@ -52,6 +53,7 @@ export function BillModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    setSaveError(null);
     try {
       const payload = {
         name: form.name,
@@ -64,14 +66,15 @@ export function BillModal({
         next_due_date: existing?.next_due_date ?? computeNextDueDate(parseInt(form.due_day), form.frequency),
       };
 
-      if (existing) {
-        await supabase.from("bills").update(payload).eq("id", existing.id);
-      } else {
-        await supabase.from("bills").insert(payload);
-      }
+      const { error } = existing
+        ? await supabase.from("bills").update(payload).eq("id", existing.id)
+        : await supabase.from("bills").insert(payload);
+      if (error) throw error;
 
       router.refresh();
       onClose();
+    } catch (err: any) {
+      setSaveError(err?.message ?? "Couldn't save the bill");
     } finally {
       setLoading(false);
     }
@@ -156,6 +159,10 @@ export function BillModal({
               placeholder="e.g. Balance: $1,000"
             />
           </Field>
+
+          {saveError && (
+            <p className="text-sm text-red-400 bg-red-500/10 rounded-xl px-4 py-3">{saveError}</p>
+          )}
 
           <button
             type="submit"

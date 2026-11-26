@@ -43,8 +43,9 @@ export default function PaymentHistoryClient({ payments, bills, months, filters 
       .eq("id", billId)
       .single();
 
-    // 2. Delete the payment record
-    await supabase.from("payments").delete().eq("id", id);
+    // 2. Delete the payment record (stop if it fails so the bill isn't rolled back by mistake)
+    const { error: delErr } = await supabase.from("payments").delete().eq("id", id);
+    if (delErr) { alert(`Couldn't delete the payment: ${delErr.message}`); return; }
 
     // 3. Roll back the next_due_date by one period so bill reappears on dashboard
     if (bill) {
@@ -58,9 +59,10 @@ export default function PaymentHistoryClient({ payments, bills, months, filters 
       const daysInMonth = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).getDate();
       const safeDay = Math.min(bill.due_day, daysInMonth);
       prev.setDate(safeDay);
-      await supabase.from("bills").update({
+      const { error: billErr } = await supabase.from("bills").update({
         next_due_date: format(prev, "yyyy-MM-dd")
       }).eq("id", billId);
+      if (billErr) alert(`Payment deleted, but the bill's due date couldn't be reset: ${billErr.message}`);
     }
 
     router.refresh();
@@ -68,11 +70,12 @@ export default function PaymentHistoryClient({ payments, bills, months, filters 
 
   async function handleEdit(e: React.FormEvent) {
     e.preventDefault();
-    await supabase.from("payments").update({
+    const { error: upErr } = await supabase.from("payments").update({
       amount_paid: parseFloat(editAmount),
       paid_by: editPaidBy,
       notes: editNotes || null,
     }).eq("id", editPayment.id);
+    if (upErr) { alert(`Couldn't save the change: ${upErr.message}`); return; }
     setEditPayment(null);
     router.refresh();
   }

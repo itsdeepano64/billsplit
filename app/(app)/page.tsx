@@ -7,7 +7,7 @@ import {
   isOverdue, getDueDateBadge, getCategoryEmoji, currentMonthBounds,
 } from "@/lib/utils";
 import type { Bill, Message } from "@/lib/types";
-import QuickPayButtons from "@/components/QuickPayButtons";
+import QuickPayButtons, { type OptimisticPay } from "@/components/QuickPayButtons";
 import { format } from "date-fns";
 import { RefreshCw, X } from "lucide-react";
 
@@ -19,6 +19,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<string>("there");
   const [messageDismissed, setMessageDismissed] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -45,6 +46,21 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Optimistic "mark paid": advance the bill + add temp payments now; refetch after the write.
+  const applyOptimistic = useCallback((p: OptimisticPay) => {
+    setBills((list) => list.map((b) => (b.id === p.billId ? { ...b, next_due_date: p.nextDue } : b)));
+    setPayments((list) => [...list, ...p.payments]);
+  }, []);
+
+  const rollbackOptimistic = useCallback((p: OptimisticPay, message: string) => {
+    const ids = new Set(p.payments.map((x) => x.id));
+    setPayments((list) => list.filter((x) => !ids.has(x.id)));
+    setBills((list) => list.map((b) => (b.id === p.billId ? { ...b, next_due_date: p.prevDue } : b)));
+    setPayError(`Couldn't mark that paid: ${message}`);
+    setTimeout(() => setPayError(null), 6000);
+    fetchData(); // refetch the truth
+  }, [fetchData]);
 
   function dismissMessage() {
     setMessageDismissed(true);
@@ -81,6 +97,10 @@ export default function DashboardPage() {
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
+
+      {payError && (
+        <div className="border border-red-500/30 bg-red-500/10 text-red-300 rounded-2xl px-4 py-3 text-sm">{payError}</div>
+      )}
 
       {/* Message banner */}
       {showMessage && (
@@ -140,7 +160,7 @@ export default function DashboardPage() {
             Overdue ({overdueBills.length})
           </h2>
           <div className="space-y-3">
-            {overdueBills.map((bill) => <BillCard key={bill.id} bill={bill} onPaid={fetchData} />)}
+            {overdueBills.map((bill) => <BillCard key={bill.id} bill={bill} onPaid={fetchData} onOptimistic={applyOptimistic} onRollback={rollbackOptimistic} />)}
           </div>
         </section>
       )}
@@ -153,7 +173,7 @@ export default function DashboardPage() {
             <span className="text-xs text-muted-foreground font-normal">next 30 days</span>
           </h2>
           <div className="space-y-3">
-            {upcomingBills.map((bill) => <BillCard key={bill.id} bill={bill} onPaid={fetchData} />)}
+            {upcomingBills.map((bill) => <BillCard key={bill.id} bill={bill} onPaid={fetchData} onOptimistic={applyOptimistic} onRollback={rollbackOptimistic} />)}
           </div>
         </section>
       )}
@@ -167,7 +187,10 @@ export default function DashboardPage() {
   );
 }
 
-function BillCard({ bill, onPaid }: { bill: Bill; onPaid: () => void }) {
+function BillCard({ bill, onPaid, onOptimistic, onRollback }: {
+  bill: Bill; onPaid: () => void;
+  onOptimistic: (p: OptimisticPay) => void; onRollback: (p: OptimisticPay, message: string) => void;
+}) {
   const days = daysUntilDue(bill.next_due_date);
   const badge = getDueDateBadge(days);
   const emoji = getCategoryEmoji(bill.category);
@@ -193,7 +216,7 @@ function BillCard({ bill, onPaid }: { bill: Bill; onPaid: () => void }) {
           </span>
         </div>
       </div>
-      <QuickPayButtons bill={bill} />
+      <QuickPayButtons bill={bill} onPaid={onPaid} onOptimistic={onOptimistic} onRollback={onRollback} />
     </div>
   );
 }

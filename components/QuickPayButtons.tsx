@@ -10,7 +10,24 @@ import { format, addWeeks } from "date-fns";
 
 const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 
-export default function QuickPayButtons({ bill }: { bill: Bill }) {
+export interface OptimisticPay {
+  billId: string;
+  nextDue: string;
+  prevDue: string;
+  /** Temporary payment rows (negative ids) so totals/counts update immediately. */
+  payments: { id: string; bill_id: string; paid_by: Payer; paid_date: string; amount_paid: number }[];
+}
+
+interface PayCallbacks {
+  /** Called right before the write: update local state immediately. */
+  onOptimistic?: (p: OptimisticPay) => void;
+  /** Called if the write fails: undo the optimistic update. */
+  onRollback?: (p: OptimisticPay, message: string) => void;
+  /** Called after the write succeeds: refetch the truth. */
+  onPaid?: () => void;
+}
+
+export default function QuickPayButtons({ bill, onOptimistic, onRollback, onPaid }: { bill: Bill } & PayCallbacks) {
   const [sheet, setSheet] = useState<Payer | null>(null);
   const [justPaid, setJustPaid] = useState(false);
 
@@ -41,6 +58,7 @@ export default function QuickPayButtons({ bill }: { bill: Bill }) {
       </div>
       {sheet && (
         <PaySheet bill={bill} payer={sheet}
+          onOptimistic={onOptimistic} onRollback={onRollback} onPaid={onPaid}
           onClose={() => setSheet(null)}
           onSuccess={() => { setSheet(null); setJustPaid(true); }} />
       )}
@@ -48,9 +66,9 @@ export default function QuickPayButtons({ bill }: { bill: Bill }) {
   );
 }
 
-function PaySheet({ bill, payer, onClose, onSuccess }: {
+function PaySheet({ bill, payer, onClose, onSuccess, onOptimistic, onRollback, onPaid }: {
   bill: Bill; payer: Payer; onClose: () => void; onSuccess: () => void;
-}) {
+} & PayCallbacks) {
   const supabase = createClient();
   const router = useRouter();
   const [amount, setAmount] = useState(bill.amount.toString());
@@ -65,6 +83,8 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
   async function handleConfirm() {
     setLoading(true);
     setError(null);
+    let optimistic: OptimisticPay | null = null;
+    let insertedIds: string[] = [];
     try {
       const parsedAmount = parseFloat(amount);
       if (isNaN(parsedAmount) || parsedAmount <= 0) throw new Error("Enter a valid amount");
@@ -72,11 +92,13 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
       if (!user) throw new Error("Not logged in");
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+      const nextDue = advanceDueDate(bill.next_due_date, bill.frequency, bill.due_day);
 
+      let rows: Record<string, unknown>[];
       if (split) {
         const weeklyAmount = Math.round((parsedAmount / weeks) * 100) / 100;
         const splitGroupId = crypto.randomUUID();
-        const payments = Array.from({ length: weeks }, (_, i) => ({
+        rows = Array.from({ length: weeks }, (_, i) => ({
           user_id: user.id,
           bill_id: bill.id,
           paid_by: payer,
@@ -86,10 +108,8 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
           weekly_split: true,
           split_group_id: splitGroupId,
         }));
-        const { error: e } = await supabase.from("payments").insert(payments);
-        if (e) throw e;
       } else {
-        const { error: e } = await supabase.from("payments").insert({
+        rows = [{
           user_id: user.id,
           bill_id: bill.id,
           paid_by: payer,
@@ -98,16 +118,43 @@ function PaySheet({ bill, payer, onClose, onSuccess }: {
           notes: notes || null,
           weekly_split: false,
           split_group_id: null,
-        });
-        if (e) throw e;
+        }];
       }
 
-      const nextDue = advanceDueDate(bill.next_due_date, bill.frequency, bill.due_day);
-      await supabase.from("bills").update({ next_due_date: nextDue }).eq("id", bill.id);
+      // 1) Optimistic: show it as paid immediately.
+      optimistic = {
+        billId: bill.id,
+        nextDue,
+        prevDue: bill.next_due_date,
+        payments: rows.map((r, i) => ({
+          id: `optimistic-${bill.id}-${i}`,
+          bill_id: bill.id,
+          paid_by: payer,
+          paid_date: String(r.paid_date),
+          amount_paid: Number(r.amount_paid),
+        })),
+      };
+      onOptimistic?.(optimistic);
+
+      // 2) Write (payment rows, then advance the due date).
+      const { data: inserted, error: e1 } = await supabase.from("payments").insert(rows).select("id");
+      if (e1) throw e1;
+      insertedIds = (inserted ?? []).map((r: { id: string }) => r.id);
+
+      const { error: e2 } = await supabase.from("bills").update({ next_due_date: nextDue }).eq("id", bill.id);
+      if (e2) throw e2;
+
+      // 3) Refetch the truth (dashboard state + server components).
       router.refresh();
+      onPaid?.();
       onSuccess();
     } catch (err: any) {
-      setError(err.message);
+      // Rollback: undo the optimistic UI, and remove any payment rows that did get written
+      // so we never leave a payment recorded without the bill advancing.
+      if (insertedIds.length) await supabase.from("payments").delete().in("id", insertedIds);
+      const message = err?.message ?? "Couldn't record the payment. Nothing was changed.";
+      if (optimistic) onRollback?.(optimistic, message);
+      setError(message);
     } finally {
       setLoading(false);
     }
