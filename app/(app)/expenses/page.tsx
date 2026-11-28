@@ -9,7 +9,7 @@ import {
   Trash2, RefreshCw, Plus, X, Camera, Image as ImageIcon,
   Eye, Pencil, MoreHorizontal, Users, Lock, BarChart3, Upload, FileText,
 } from "lucide-react";
-import type { ExpenseTab, Expense, ExpenseItem, Payer } from "@/lib/types";
+import type { ExpenseTab, Expense, ExpenseItem, Payer, TabAccess } from "@/lib/types";
 import ExpenseDetail, { ItemImage } from "@/components/expenses/ExpenseDetail";
 import ItemsEditor from "@/components/expenses/ItemsEditor";
 import RangeFilter from "@/components/expenses/RangeFilter";
@@ -17,6 +17,7 @@ import {
   ALL_TIME, type DateRange, rangeLabel, inRange, getCurrentUser, visibleTabs, canSee,
   isTabShared, updateExpense, insertExpenses, uploadReceipt, isPdf, sum,
   itemsOf, thumbOf, thumbnailForItems, vendorOf,
+  ACCESS_OPTIONS, tabAccess, accessLabel, canAddToTab, addableTabs, canModifyExpense, setTabAccess,
 } from "@/lib/expenses";
 
 const EXPENSE_CATEGORIES = [
@@ -49,6 +50,7 @@ export default function ExpensesPage() {
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
   const [showTabMenu, setShowTabMenu] = useState<string | null>(null);
+  const [accessTab, setAccessTab] = useState<ExpenseTab | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => { setCurrentUser(getCurrentUser()); }, []);
@@ -100,6 +102,8 @@ export default function ExpensesPage() {
   }
 
   async function handleDelete(id: string) {
+    const target = allExpenses.find(e => e.id === id);
+    if (target && !canModifyExpense(target, tabsById, currentUser)) { flash("You don't have permission to delete this"); return; }
     if (!confirm("Delete this expense?")) return;
     await supabase.from("expenses").delete().eq("id", id);
     fetchExpenses();
@@ -117,11 +121,14 @@ export default function ExpensesPage() {
     }
   }
 
-  async function handleToggleTabShare(tab: ExpenseTab) {
-    const owner = tab.owner === "shared" ? "Deepen" : "shared";
-    const { error } = await supabase.from("expense_tabs").update({ owner }).eq("id", tab.id);
-    if (error) flash(error.message);
-    else flash(owner === "shared" ? `"${tab.name}" shared with DeShea` : `"${tab.name}" is private`);
+  async function handleSetAccess(tab: ExpenseTab, access: TabAccess) {
+    if (currentUser !== "Deepen") return;
+    const prev = allTabs;
+    setAllTabs(list => list.map(t => t.id === tab.id ? { ...t, deshea_access: access, owner: t.owner === "DeShea" ? "DeShea" : access === "hidden" ? "Deepen" : "shared" } : t));
+    setAccessTab(t => (t && t.id === tab.id ? { ...t, deshea_access: access } : t));
+    const { error } = await setTabAccess(supabase, tab, access);
+    if (error) { setAllTabs(prev); flash(error.message ?? "Couldn't change access"); }
+    else flash(`DeShea access to "${tab.name}": ${accessLabel(access)}`);
     fetchTabs();
   }
 
@@ -149,6 +156,9 @@ export default function ExpensesPage() {
 
   const allDisplayTabs = [ALL_TAB, ...tabs];
   const activeTab = allDisplayTabs.find(t => t.id === activeTabId) ?? ALL_TAB;
+  const formTabs = useMemo(() => addableTabs(tabs, currentUser), [tabs, currentUser]);
+  // Can the current person add to the tab they're looking at? ("All" is always fine: the form only offers tabs she can add to.)
+  const canAddHere = activeTabId === ALL_TAB_ID || canAddToTab(activeTab, currentUser);
   const statsHref = `/expenses/stats${activeTabId !== ALL_TAB_ID ? `?tab=${activeTabId}` : ""}`;
 
   return (
@@ -175,8 +185,9 @@ export default function ExpensesPage() {
               <Upload className="w-4 h-4" />
             </Link>
             <button
-              onClick={() => setShowAddExpense(true)}
-              className="flex items-center gap-2 bg-primary/15 border border-primary/30 text-primary rounded-xl px-4 py-2.5 text-sm font-semibold active:scale-[0.97] transition-all"
+              onClick={() => (canAddHere ? setShowAddExpense(true) : flash("This tab is view only for you"))}
+              disabled={!canAddHere}
+              className="flex items-center gap-2 disabled:opacity-40 bg-primary/15 border border-primary/30 text-primary rounded-xl px-4 py-2.5 text-sm font-semibold active:scale-[0.97] transition-all"
             >
               <Plus className="w-4 h-4" strokeWidth={2.5} />
               Add
@@ -198,7 +209,7 @@ export default function ExpensesPage() {
                 ].join(" ")}
               >
                 {tab.name}
-                {tab.id !== ALL_TAB_ID && isTabShared(tab) && <Users className="w-3 h-3 opacity-80" />}
+                {tab.id !== ALL_TAB_ID && currentUser === "Deepen" && tab.owner !== "DeShea" && tabAccess(tab) !== "hidden" && <Users className="w-3 h-3 opacity-80" />}
               </button>
               {tab.id !== ALL_TAB_ID && activeTabId === tab.id && (
                 <button
@@ -218,6 +229,26 @@ export default function ExpensesPage() {
             + Tab
           </button>
         </div>
+
+        {/* DeShea access control: obvious, one tap */}
+        {activeTabId !== ALL_TAB_ID && currentUser === "Deepen" && activeTab.owner !== "DeShea" && (
+          <button
+            onClick={() => setAccessTab(activeTab)}
+            className="mt-2 w-full flex items-center justify-between gap-2 bg-muted/60 border border-border rounded-xl px-3 py-2 text-xs"
+            aria-label={`DeShea access: ${accessLabel(tabAccess(activeTab))}. Tap to change`}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              {tabAccess(activeTab) === "hidden" ? <Lock className="w-3.5 h-3.5 text-muted-foreground" /> : <Users className="w-3.5 h-3.5 text-indigo-400" />}
+              <span className="truncate">DeShea access: <span className="font-semibold">{accessLabel(tabAccess(activeTab))}</span></span>
+            </span>
+            <span className="text-primary font-semibold flex-shrink-0">Change</span>
+          </button>
+        )}
+        {activeTabId !== ALL_TAB_ID && currentUser === "DeShea" && activeTab.owner !== "DeShea" && (
+          <p className="mt-2 text-[11px] text-muted-foreground flex items-center gap-1.5">
+            <Users className="w-3 h-3" /> Shared with you by Deepen · {tabAccess(activeTab) === "edit" ? "you can add expenses" : "view only"}
+          </p>
+        )}
       </div>
 
       {showTabMenu && (() => {
@@ -230,20 +261,20 @@ export default function ExpensesPage() {
               <p className="px-4 pt-3 pb-2 text-xs text-muted-foreground truncate">{tab.name}</p>
               {currentUser === "Deepen" && (
                 <button
-                  onClick={() => { handleToggleTabShare(tab); setShowTabMenu(null); }}
+                  onClick={() => { setAccessTab(tab); setShowTabMenu(null); }}
                   className="w-full flex items-center justify-between gap-2 px-4 py-3 text-sm border-t border-border"
                 >
-                  <span className="flex items-center gap-2"><Users className="w-4 h-4" /> Share tab with DeShea</span>
-                  <Switch on={isTabShared(tab)} />
+                  <span className="flex items-center gap-2"><Users className="w-4 h-4" /> DeShea access</span>
+                  <span className="text-xs text-muted-foreground">{accessLabel(tabAccess(tab))}</span>
                 </button>
               )}
-              <button
+              {currentUser === "Deepen" && <button
                 onClick={() => { handleDeleteTab(tab.id); setShowTabMenu(null); }}
                 className="w-full flex items-center gap-2 px-4 py-3 text-sm text-destructive border-t border-border"
               >
                 <Trash2 className="w-4 h-4" />
                 Delete Tab
-              </button>
+              </button>}
             </div>
           </>
         );
@@ -334,6 +365,7 @@ export default function ExpensesPage() {
                 expense={exp}
                 tabs={allTabs}
                 canShare={currentUser === "Deepen"}
+                canModify={canModifyExpense(exp, tabsById, currentUser)}
                 onDelete={() => handleDelete(exp.id)}
                 onEdit={() => setEditingExpense(exp)}
                 onOpen={() => setDetailExpense(exp)}
@@ -357,7 +389,7 @@ export default function ExpensesPage() {
 
       {showAddExpense && (
         <ExpenseSheet
-          tabs={tabs}
+          tabs={formTabs}
           currentUser={currentUser}
           defaultTabId={activeTabId !== ALL_TAB_ID ? activeTabId : undefined}
           onClose={() => setShowAddExpense(false)}
@@ -366,7 +398,7 @@ export default function ExpensesPage() {
       )}
       {editingExpense && (
         <ExpenseSheet
-          tabs={tabs}
+          tabs={formTabs}
           currentUser={currentUser}
           editing={editingExpense}
           onClose={() => setEditingExpense(null)}
@@ -384,6 +416,7 @@ export default function ExpensesPage() {
         <ExpenseDetail
           expense={allExpenses.find(x => x.id === detailExpense.id) ?? detailExpense}
           tabs={allTabs}
+          canEdit={canModifyExpense(allExpenses.find(x => x.id === detailExpense.id) ?? detailExpense, tabsById, currentUser)}
           onClose={() => setDetailExpense(null)}
           onEdit={() => { setEditingExpense(allExpenses.find(x => x.id === detailExpense.id) ?? detailExpense); setDetailExpense(null); }}
           onPreviewReceipt={() => {
@@ -392,6 +425,13 @@ export default function ExpensesPage() {
             if (isPdf(url)) window.open(url, "_blank", "noopener");
             else setPreviewUrl(url);
           }}
+        />
+      )}
+      {accessTab && (
+        <TabAccessSheet
+          tab={allTabs.find(t => t.id === accessTab.id) ?? accessTab}
+          onPick={(a) => handleSetAccess(allTabs.find(t => t.id === accessTab.id) ?? accessTab, a)}
+          onClose={() => setAccessTab(null)}
         />
       )}
       {previewUrl && (
@@ -411,8 +451,8 @@ function Switch({ on }: { on: boolean }) {
 
 // ─── Expense Row ──────────────────────────────────────────────────────────────
 
-function ExpenseRow({ expense: exp, tabs, canShare, onDelete, onEdit, onOpen, onToggleShare, onPreviewReceipt }: {
-  expense: Expense; tabs: ExpenseTab[]; canShare: boolean;
+function ExpenseRow({ expense: exp, tabs, canShare, canModify, onDelete, onEdit, onOpen, onToggleShare, onPreviewReceipt }: {
+  expense: Expense; tabs: ExpenseTab[]; canShare: boolean; canModify: boolean;
   onDelete: () => void; onEdit: () => void; onOpen: () => void; onToggleShare: () => void; onPreviewReceipt: () => void;
 }) {
   const tabName = tabs.find(t => t.id === exp.tab_id)?.name;
@@ -472,12 +512,16 @@ function ExpenseRow({ expense: exp, tabs, canShare, onDelete, onEdit, onOpen, on
             {exp.shared ? <Users className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
           </button>
         )}
-        <button onClick={onEdit} aria-label="Edit" className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted">
-          <Pencil className="w-3.5 h-3.5" />
-        </button>
-        <button onClick={onDelete} aria-label="Delete" className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10">
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+        {canModify && (
+          <>
+            <button onClick={onEdit} aria-label="Edit" className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted">
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={onDelete} aria-label="Delete" className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -766,7 +810,7 @@ function AddTabSheet({ currentUser, onClose, onSaved }: {
 }) {
   const supabase = createClient();
   const [name, setName] = useState("");
-  const [owner, setOwner] = useState<"shared" | "DeShea" | "Deepen">("shared");
+  const [access, setAccess] = useState<TabAccess>("hidden");
   const [saving, setSaving] = useState(false);
 
   // Lock background scroll
@@ -781,7 +825,15 @@ function AddTabSheet({ currentUser, onClose, onSaved }: {
     setSaving(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setSaving(false); return; }
-    await supabase.from("expense_tabs").insert({ user_id: user.id, name: name.trim(), owner, position: 999 });
+    const base = { user_id: user.id, name: name.trim(), position: 999 };
+    if (currentUser === "DeShea") {
+      // Her own tab: she can always view + add; hidden from nobody she needs.
+      await supabase.from("expense_tabs").insert({ ...base, owner: "DeShea", deshea_access: "edit" });
+    } else {
+      const owner = access === "hidden" ? "Deepen" : "shared";
+      const { error } = await supabase.from("expense_tabs").insert({ ...base, owner, deshea_access: access });
+      if (error && /deshea_access/i.test(error.message)) await supabase.from("expense_tabs").insert({ ...base, owner });
+    }
     onSaved();
   }
 
@@ -819,29 +871,28 @@ function AddTabSheet({ currentUser, onClose, onSaved }: {
               className={inputCls}
             />
           </div>
-          <div className="space-y-1.5">
-            <label className={labelCls}>Visibility</label>
-            <div className="grid grid-cols-3 gap-2">
-              {([
-                { value: "shared", label: "Shared 👫" },
-                { value: "DeShea", label: "💜 DeShea" },
-                { value: "Deepen", label: "💚 Deepen" },
-              ] as const).map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setOwner(opt.value)}
-                  className={`py-3.5 rounded-xl text-sm font-semibold border-2 transition-all ${
-                    owner === opt.value
-                      ? "bg-primary/20 border-primary text-primary"
-                      : "bg-muted border-border text-muted-foreground"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
+          {currentUser === "Deepen" && (
+            <div className="space-y-1.5">
+              <label className={labelCls}>DeShea access</label>
+              <div className="grid grid-cols-3 gap-2">
+                {ACCESS_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setAccess(opt.value)}
+                    className={`py-3.5 rounded-xl text-sm font-semibold border-2 transition-all ${
+                      access === opt.value
+                        ? "bg-primary/20 border-primary text-primary"
+                        : "bg-muted border-border text-muted-foreground"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">{ACCESS_OPTIONS.find(o => o.value === access)?.help}</p>
             </div>
-          </div>
+          )}
           <button
             onClick={handleSave}
             disabled={saving || !name.trim()}
@@ -850,6 +901,58 @@ function AddTabSheet({ currentUser, onClose, onSaved }: {
             {saving ? "Creating…" : "Create Tab"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab access (DeShea) ──────────────────────────────────────────────────────
+
+function TabAccessSheet({ tab, onPick, onClose }: {
+  tab: ExpenseTab; onPick: (a: TabAccess) => void; onClose: () => void;
+}) {
+  const current = tabAccess(tab);
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.body.classList.add("sheet-open");
+    return () => { document.body.style.overflow = prev; document.body.classList.remove("sheet-open"); };
+  }, []);
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center" role="dialog" aria-modal="true" aria-label="DeShea access">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-lg bg-card rounded-t-3xl border-t border-x border-border animate-fade-in px-5 pt-5"
+        style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold">DeShea access</h2>
+            <p className="text-xs text-muted-foreground truncate">{tab.name}</p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 flex items-center justify-center rounded-full bg-muted flex-shrink-0">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="space-y-2">
+          {ACCESS_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => onPick(opt.value)}
+              aria-pressed={current === opt.value}
+              className={`w-full text-left rounded-2xl border-2 px-4 py-3 transition-all ${
+                current === opt.value ? "bg-primary/15 border-primary" : "bg-muted border-border"
+              }`}
+            >
+              <span className="flex items-center justify-between">
+                <span className="font-semibold text-sm">{opt.label}</span>
+                {current === opt.value && <span className="text-[10px] font-bold text-primary uppercase tracking-wide">Current</span>}
+              </span>
+              <span className="block text-xs text-muted-foreground mt-0.5">{opt.help}</span>
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-4">
+          Applies to this tab and every expense in it. Enforced in the app: you and DeShea currently share one login.
+        </p>
       </div>
     </div>
   );

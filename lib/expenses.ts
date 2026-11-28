@@ -4,7 +4,7 @@ import {
   format, startOfMonth, endOfMonth, subMonths, startOfYear, endOfYear, subYears,
 } from "date-fns";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Expense, ExpenseItem, ExpenseTab, Payer } from "@/lib/types";
+import type { Expense, ExpenseItem, ExpenseTab, Payer, TabAccess } from "@/lib/types";
 
 // ─── Date filter ──────────────────────────────────────────────────────────────
 
@@ -78,23 +78,71 @@ export function getCurrentUser(): Payer {
   return v === "DeShea" ? "DeShea" : "Deepen";
 }
 
-export function isTabShared(tab: ExpenseTab | undefined | null) {
-  return !!tab && tab.owner === "shared";
+export const ACCESS_OPTIONS: { value: TabAccess; label: string; short: string; help: string }[] = [
+  { value: "hidden", label: "Hidden", short: "Hidden", help: "DeShea can't see this tab or its expenses." },
+  { value: "view", label: "View only", short: "View only", help: "DeShea can see the tab and its expenses, but can't add or change anything." },
+  { value: "edit", label: "View + add", short: "View + add", help: "DeShea can see the tab and add expenses to it. She can only edit or delete her own." },
+];
+
+/** DeShea's access level for a tab. Falls back to the legacy `owner` flag if the column isn't there yet. */
+export function tabAccess(tab: ExpenseTab | undefined | null): TabAccess {
+  if (!tab) return "hidden";
+  if (tab.owner === "DeShea") return "edit"; // her own tab
+  if (tab.deshea_access) return tab.deshea_access;
+  return tab.owner === "shared" ? "edit" : "hidden";
 }
 
-/** Tabs a user can see. Deepen sees everything; DeShea sees shared tabs and her own. */
+export function accessLabel(a: TabAccess) {
+  return ACCESS_OPTIONS.find(o => o.value === a)?.short ?? "Hidden";
+}
+
+/** Tab is visible to DeShea (view or view + add). */
+export function isTabShared(tab: ExpenseTab | undefined | null) {
+  return tabAccess(tab) !== "hidden";
+}
+
+/** Tabs a user can see. Deepen sees everything; DeShea sees tabs shared with her and her own. */
 export function visibleTabs(tabs: ExpenseTab[], user: Payer) {
   if (user === "Deepen") return tabs;
-  return tabs.filter(t => t.owner === "shared" || t.owner === "DeShea");
+  return tabs.filter(t => tabAccess(t) !== "hidden");
 }
 
-/** Deepen sees everything. DeShea sees her own, anything marked shared, and anything in a shared/DeShea tab. */
+/** Can this user add expenses to this tab? (Deepen always; DeShea only with "View + add" or her own tab.) */
+export function canAddToTab(tab: ExpenseTab | undefined | null, user: Payer) {
+  if (user === "Deepen") return true;
+  return tabAccess(tab) === "edit";
+}
+
+/** Tabs a user may add expenses to. */
+export function addableTabs(tabs: ExpenseTab[], user: Payer) {
+  return tabs.filter(t => canAddToTab(t, user));
+}
+
+/** Deepen can change anything. DeShea can only change expenses she paid, in tabs she can add to (or no tab). */
+export function canModifyExpense(e: Expense, tabsById: Map<string, ExpenseTab>, user: Payer) {
+  if (user === "Deepen") return true;
+  if (e.paid_by !== "DeShea") return false;
+  if (!e.tab_id) return true;
+  return canAddToTab(tabsById.get(e.tab_id), user);
+}
+
+/** Deepen sees everything. DeShea sees her own, anything marked shared, and anything in a tab shared with her. */
 export function canSee(e: Expense, tabsById: Map<string, ExpenseTab>, user: Payer) {
   if (user === "Deepen") return true;
   if (e.paid_by === "DeShea") return true;
   if (e.shared) return true;
   const tab = e.tab_id ? tabsById.get(e.tab_id) : undefined;
-  return !!tab && (tab.owner === "shared" || tab.owner === "DeShea");
+  return !!tab && tabAccess(tab) !== "hidden";
+}
+
+/** Set DeShea's access for a tab (also keeps the legacy `owner` flag in sync for older cached builds). */
+export async function setTabAccess(supabase: SupabaseClient, tab: ExpenseTab, access: TabAccess) {
+  const owner = tab.owner === "DeShea" ? "DeShea" : access === "hidden" ? "Deepen" : "shared";
+  let { error } = await supabase.from("expense_tabs").update({ deshea_access: access, owner }).eq("id", tab.id);
+  if (isMissingColumn(error)) {
+    ({ error } = await supabase.from("expense_tabs").update({ owner }).eq("id", tab.id));
+  }
+  return { error };
 }
 
 // ─── Writes that survive a missing migration ─────────────────────────────────
