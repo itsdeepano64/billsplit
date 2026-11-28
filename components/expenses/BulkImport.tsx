@@ -8,7 +8,7 @@ import { ArrowLeft, Upload, FileText, Trash2, RefreshCw, CheckCircle2, AlertCirc
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/utils";
 import type { ExpenseTab, Payer } from "@/lib/types";
-import { getCurrentUser, visibleTabs, uploadReceipt, insertExpenses, thumbnailForItems } from "@/lib/expenses";
+import { getCurrentUser, visibleTabs, addableTabs, uploadReceipt, insertExpenses, thumbnailForItems } from "@/lib/expenses";
 import ItemsEditor from "@/components/expenses/ItemsEditor";
 import type { ExpenseItem } from "@/lib/types";
 
@@ -49,7 +49,7 @@ export default function BulkImport() {
     const user = getCurrentUser();
     (async () => {
       const { data } = await supabase.from("expense_tabs").select("*").order("position").order("created_at");
-      const list = visibleTabs((data ?? []) as ExpenseTab[], user);
+      const list = addableTabs(visibleTabs((data ?? []) as ExpenseTab[], user), user);
       setTabs(list);
       const tools = list.find(t => /tool/i.test(t.name));
       setTabId(tools?.id ?? "");

@@ -26,8 +26,9 @@ export function ItemImage({ src, alt, className }: { src?: string | null; alt: s
   );
 }
 
-export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPreviewReceipt }: {
+export default function ExpenseDetail({ expense: e, tabs, canEdit = true, onClose, onEdit, onPreviewReceipt }: {
   expense: Expense;
+  canEdit?: boolean;
   tabs: ExpenseTab[];
   onClose: () => void;
   onEdit: () => void;
@@ -167,10 +168,12 @@ export default function ExpenseDetail({ expense: e, tabs, onClose, onEdit, onPre
           ) : (
             <div className="flex items-center justify-center py-3 rounded-xl bg-muted text-xs text-muted-foreground">No receipt file</div>
           )}
-          <button onClick={onEdit} data-testid="edit-expense"
-            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-muted border border-border text-sm font-semibold">
-            <Pencil className="w-4 h-4" /> Edit
-          </button>
+          {canEdit && (
+            <button onClick={onEdit} data-testid="edit-expense"
+              className="flex items-center justify-center gap-2 py-3 rounded-xl bg-muted border border-border text-sm font-semibold">
+              <Pencil className="w-4 h-4" /> Edit
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -65,6 +65,8 @@ export interface Transfer {
   created_at: string;
 }
 
+export type TabAccess = "hidden" | "view" | "edit";
+
 export interface ExpenseTab {
   id: string;
   user_id: string;
@@ -72,6 +74,8 @@ export interface ExpenseTab {
   owner: "DeShea" | "Deepen" | "shared";
   position: number;
   created_at: string;
+  /** DeShea's access to this tab (hidden | view | edit). Added by 20261128100000_expense_tab_deshea_access.sql. */
+  deshea_access?: TabAccess;
 }
 
 export interface Expense {
